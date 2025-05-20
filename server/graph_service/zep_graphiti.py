@@ -153,12 +153,12 @@ async def get_graphiti(settings: ZepEnvDep):
             base_url=settings.openai_base_url,
         )
         llm_client_instance = OpenAIClient(config=llm_core_config)
-        logger.info(
-            f'LLM Client configured for model: {settings.model_name} at {settings.openai_base_url}'
+        logger.critical(
+            f'CRITICAL_LLM_CONFIG: LLM Client configured for model: {settings.model_name} at {settings.openai_base_url}'
         )
     else:
-        logger.warning(
-            'LLM Client NOT configured due to missing model_name or openai_base_url. Custom entity extraction might be affected.'
+        logger.critical(
+            f'CRITICAL_LLM_CONFIG_FAIL: LLM Client NOT configured due to missing model_name or openai_base_url. Custom entity extraction might be affected.'
         )
 
     embedder_client_instance: EmbedderClient | None = None
@@ -169,12 +169,12 @@ async def get_graphiti(settings: ZepEnvDep):
             base_url=settings.openai_base_url,
         )
         embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
-        logger.info(
-            f'Embedder Client configured for model: {settings.embedding_name} at {settings.openai_base_url}'
+        logger.critical(
+            f'CRITICAL_EMBEDDER_CONFIG: Embedder Client configured for model: {settings.embedding_name} at {settings.openai_base_url}'
         )
     else:
-        logger.warning(
-            'Embedder Client NOT configured due to missing embedding_name or openai_base_url. Embeddings will not be generated.'
+        logger.critical(
+            f'CRITICAL_EMBEDDER_CONFIG_FAIL: Embedder Client NOT configured due to missing embedding_name or openai_base_url. Embeddings will not be generated.'
         )
 
     client = ZepGraphiti(
