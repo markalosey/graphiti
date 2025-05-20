@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = 'gpt-4.1-mini'
 DEFAULT_SMALL_MODEL = 'gpt-4.1-nano'
+DEFAULT_MAX_TOKENS_INIT = 8192
+DEFAULT_TEMPERATURE_INIT = 0.7
+DEFAULT_MAX_RETRIES_INIT = 2
+DEFAULT_RETRY_DELAY_INIT = 1.0
 
 
 class OpenAIClient(LLMClient):
@@ -58,19 +62,21 @@ class OpenAIClient(LLMClient):
     """
 
     # Class-level constants
-    MAX_RETRIES: ClassVar[int] = 2
+    MAX_RETRIES: ClassVar[int] = DEFAULT_MAX_RETRIES_INIT
 
     def __init__(
         self,
-        config: LLMConfig | None = None,
+        config: Optional[LLMConfig] = None,
         cache: bool = False,
-        client: typing.Any = None,
-        max_tokens: int = DEFAULT_MAX_TOKENS,
-        model: str = DEFAULT_MODEL,
-        temperature: float = 0.7,
-        max_retries: int = MAX_RETRIES,
-        retry_delay: float = 1,
-        small_model: str = DEFAULT_SMALL_MODEL,
+        client: Optional[AsyncOpenAI] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        max_retries: Optional[int] = None,
+        retry_delay: Optional[float] = None,
+        small_model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
     ):
         """
         Initialize the OpenAIClient with the provided configuration, cache setting, and client.
@@ -87,40 +93,78 @@ class OpenAIClient(LLMClient):
             small_model (str): The small model name to use for generating responses.
 
         """
-        # removed caching to simplify the `generate_response` override
         if cache:
             raise NotImplementedError('Caching is not implemented for OpenAI')
 
-        if config is None:
-            config = LLMConfig()
+        effective_config = config if config is not None else LLMConfig()
 
-        super().__init__(config, cache)
+        super().__init__(effective_config, cache)
+
+        final_api_key = api_key or effective_config.api_key
+        final_base_url = base_url or effective_config.base_url
 
         if client is None:
-            self.client = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
+            self.client = AsyncOpenAI(api_key=final_api_key, base_url=final_base_url)
         else:
             self.client = client
+            if final_api_key and (not self.client.api_key or self.client.api_key != final_api_key):
+                self.client.api_key = final_api_key
+            if final_base_url and (
+                not self.client.base_url or str(self.client.base_url) != final_base_url
+            ):
+                self.client.base_url = final_base_url
 
-        self.max_tokens = max_tokens
-        self.model = model
-        self.temperature = temperature
-        self.max_retries = max_retries
-        self.retry_delay = retry_delay
-        self.small_model = small_model
-
-        # Ensure config attributes are accessed safely if config can be None
-        if config:
-            if hasattr(config, 'api_key') and not self.client.api_key:
-                self.client.api_key = config.api_key
-            if hasattr(config, 'base_url') and not self.client.base_url:
-                self.client.base_url = config.base_url
+        self.model = model or effective_config.model or DEFAULT_MODEL
+        self.temperature = (
+            temperature
+            if temperature is not None
+            else (
+                effective_config.temperature
+                if effective_config.temperature is not None
+                else DEFAULT_TEMPERATURE_INIT
+            )
+        )
+        self.max_tokens = (
+            max_tokens
+            if max_tokens is not None
+            else (
+                effective_config.max_tokens
+                if effective_config.max_tokens is not None
+                else DEFAULT_MAX_TOKENS_INIT
+            )
+        )
+        self.max_retries = (
+            max_retries
+            if max_retries is not None
+            else (
+                effective_config.max_retries
+                if hasattr(effective_config, 'max_retries')
+                and effective_config.max_retries is not None
+                else self.MAX_RETRIES
+            )
+        )
+        self.retry_delay = (
+            retry_delay
+            if retry_delay is not None
+            else (
+                effective_config.retry_delay
+                if hasattr(effective_config, 'retry_delay')
+                and effective_config.retry_delay is not None
+                else DEFAULT_RETRY_DELAY_INIT
+            )
+        )
+        self.small_model = small_model or (
+            effective_config.small_model
+            if hasattr(effective_config, 'small_model') and effective_config.small_model
+            else DEFAULT_SMALL_MODEL
+        )
 
     async def _generate_response(
         self,
         messages: List[PromptMessage],
         response_model: Optional[Type[BaseModel]] = None,
-        max_tokens: Optional[int] = None,
-        temperature: Optional[float] = None,
+        max_tokens_override: Optional[int] = None,
+        temperature_override: Optional[float] = None,
     ) -> Dict[str, Any]:
         openai_messages: list[ChatCompletionMessageParam] = []
         for m in messages:
@@ -131,9 +175,13 @@ class OpenAIClient(LLMClient):
             elif m.role == 'system':
                 openai_messages.append({'role': 'system', 'content': m.content})
 
-        effective_model = self.model or DEFAULT_MODEL
-        effective_temperature = temperature if temperature is not None else self.temperature
-        effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
+        effective_model = self.model
+        effective_temperature = (
+            temperature_override if temperature_override is not None else self.temperature
+        )
+        effective_max_tokens = (
+            max_tokens_override if max_tokens_override is not None else self.max_tokens
+        )
 
         request_params = {
             'model': effective_model,
@@ -227,10 +275,7 @@ class OpenAIClient(LLMClient):
             max_tokens = self.max_tokens
 
         retry_count = 0
-        last_error = None
-
-        # Add multilingual extraction instructions
-        messages[0].content += MULTILINGUAL_EXTRACTION_RESPONSES
+        last_exception = None
 
         while retry_count <= self.max_retries:
             try:
@@ -244,30 +289,35 @@ class OpenAIClient(LLMClient):
             except (openai.APITimeoutError, openai.APIConnectionError, openai.InternalServerError):
                 # Let OpenAI's client handle these retries
                 raise
-            except Exception as e:
-                last_error = e
-
-                # Don't retry if we've hit the max retries
-                if retry_count >= self.max_retries:
-                    logger.error(f'Max retries ({self.max_retries}) exceeded. Last error: {e}')
-                    raise
-
+            except openai.RateLimitError as e:
+                last_exception = e
                 retry_count += 1
-
-                # Construct a detailed error message for the LLM
-                error_context = (
-                    f'The previous response attempt was invalid. '
-                    f'Error type: {e.__class__.__name__}. '
-                    f'Error details: {str(e)}. '
-                    f'Please try again with a valid response, ensuring the output matches '
-                    f'the expected format and constraints.'
-                )
-
-                error_message = PromptMessage(role='user', content=error_context)
-                messages.append(error_message)
+                if retry_count > self.max_retries:
+                    logger.error(f'Max retries ({self.max_retries}) exceeded for RateLimitError.')
+                    break
+                sleep_time = self.retry_delay * (2**retry_count)
                 logger.warning(
-                    f'Retrying after application error (attempt {retry_count}/{self.max_retries}): {e}'
+                    f'RateLimitError. Retrying in {sleep_time} seconds... (attempt {retry_count}/{self.max_retries})'
                 )
+                await asyncio.sleep(sleep_time)
+            except openai.APIError as e:
+                last_exception = e
+                retry_count += 1
+                if retry_count > self.max_retries:
+                    logger.error(f'Max retries ({self.max_retries}) exceeded for APIError.')
+                    break
+                sleep_time = self.retry_delay * (2**retry_count)
+                logger.warning(
+                    f'APIError: {str(e)}. Retrying in {sleep_time} seconds... (attempt {retry_count}/{self.max_retries})'
+                )
+                await asyncio.sleep(sleep_time)
+            except Exception as e:
+                logger.error(
+                    f'Unhandled exception from _generate_response: {str(e)}', exc_info=True
+                )
+                raise e
 
-        # If we somehow get here, raise the last error
-        raise last_error or Exception('Max retries exceeded with no specific error')
+        if last_exception:
+            raise last_exception
+        else:
+            raise Exception('LLM call failed after retries without specific exception.')
