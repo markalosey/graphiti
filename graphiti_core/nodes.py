@@ -638,23 +638,23 @@ def get_community_node_from_record(record: Any) -> CommunityNode:
 
 async def create_entity_node_embeddings(embedder: EmbedderClient, nodes: list[EntityNode]):
     """Generate name embeddings for a list of entity nodes in place."""
-    # This function is likely redundant if generate_name_embedding is called individually
-    # but can be useful for bulk operations if nodes don't have the method themselves
-    # or if a different embedding strategy is needed for a batch.
     texts_to_embed = [node.name.replace('\n', ' ') for node in nodes if node.name_embedding is None]
     if not texts_to_embed:
         return
 
-    logger.critical(f'BULK_NODE_EMBED: Generating embeddings for {len(texts_to_embed)} node names.')
-    embeddings = await embedder.create(input_data=texts_to_embed)
+    logger.critical(
+        f'BULK_NODE_EMBED: Generating embeddings for {len(texts_to_embed)} node names via create_batch.'
+    )
+    # Use create_batch which should return List[List[float]]
+    list_of_embeddings = await embedder.create_batch(input_data=texts_to_embed)
 
-    idx = 0
+    embed_idx = 0
     for node in nodes:
         if node.name_embedding is None:
-            if idx < len(embeddings):
-                node.name_embedding = embeddings[idx]
+            if embed_idx < len(list_of_embeddings):
+                node.name_embedding = list_of_embeddings[embed_idx]
                 logger.critical(f"BULK_NODE_EMBED: Set name_embedding for node '{node.name}'")
-                idx += 1
+                embed_idx += 1
             else:
                 logger.error(
                     f"BULK_NODE_EMBED: Mismatch in embedding results for node '{node.name}'"

@@ -523,25 +523,25 @@ def get_community_edge_from_record(record: Any) -> CommunityEdge:
 
 async def create_entity_edge_embeddings(embedder: EmbedderClient, edges: list[EntityEdge]):
     """Generate fact embeddings for a list of entity edges in place."""
-    # This function is likely redundant if generate_embedding is called individually
-    # but can be useful for bulk operations if edges don't have the method themselves
-    # or if a different embedding strategy is needed for a batch.
     texts_to_embed = [edge.fact.replace('\n', ' ') for edge in edges if edge.fact_embedding is None]
     if not texts_to_embed:
         return
 
-    logger.critical(f'BULK_EDGE_EMBED: Generating embeddings for {len(texts_to_embed)} edge facts.')
-    embeddings = await embedder.create(input_data=texts_to_embed)
+    logger.critical(
+        f'BULK_EDGE_EMBED: Generating embeddings for {len(texts_to_embed)} edge facts via create_batch.'
+    )
+    # Use create_batch which should return List[List[float]]
+    list_of_embeddings = await embedder.create_batch(input_data=texts_to_embed)
 
-    idx = 0
+    embed_idx = 0
     for edge in edges:
         if edge.fact_embedding is None:
-            if idx < len(embeddings):
-                edge.fact_embedding = embeddings[idx]
+            if embed_idx < len(list_of_embeddings):
+                edge.fact_embedding = list_of_embeddings[embed_idx]
                 logger.critical(
                     f"BULK_EDGE_EMBED: Set fact_embedding for edge fact '{edge.fact[:50]}...'"
                 )
-                idx += 1
+                embed_idx += 1
             else:
                 logger.error(
                     f"BULK_EDGE_EMBED: Mismatch in embedding results for edge fact '{edge.fact[:50]}...'"
