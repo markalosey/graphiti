@@ -1,4 +1,8 @@
 import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # Force debug level for this logger
+
 from typing import Annotated
 
 from fastapi import Depends, HTTPException
@@ -25,8 +29,6 @@ from pydantic import BaseModel, Field  # For defining ENTITY_TYPES here for now
 
 from graph_service.config import ZepEnvDep, Settings  # Import Settings directly too
 from graph_service.dto import FactResult
-
-logger = logging.getLogger(__name__)
 
 
 # --- Define Custom Entity Types (Copied/adapted from old MCP server) ---
@@ -130,16 +132,18 @@ class ZepGraphiti(Graphiti):
 # This is the dependency injector that FastAPI routes will use
 async def get_graphiti(settings: ZepEnvDep):
     logger.critical('!!!!!!!!!!!! GET_GRAPHITI CALLED !!!!!!!!!!!!')
-    logger.info(
-        f"DEBUG: settings.model_name = '{settings.model_name}' (type: {type(settings.model_name)})"
+    logger.critical(
+        f"CRITICAL_DEBUG: settings.model_name = '{settings.model_name}' (type: {type(settings.model_name)})"
     )
-    logger.info(
-        f"DEBUG: settings.embedding_name = '{settings.embedding_name}' (type: {type(settings.embedding_name)})"
+    logger.critical(
+        f"CRITICAL_DEBUG: settings.embedding_name = '{settings.embedding_name}' (type: {type(settings.embedding_name)})"
     )
-    logger.info(
-        f"DEBUG: settings.openai_base_url = '{settings.openai_base_url}' (type: {type(settings.openai_base_url)})"
+    logger.critical(
+        f"CRITICAL_DEBUG: settings.openai_base_url = '{settings.openai_base_url}' (type: {type(settings.openai_base_url)})"
     )
-    logger.info(f'DEBUG: settings.openai_api_key IS SET: {bool(settings.openai_api_key)}')
+    logger.critical(
+        f'CRITICAL_DEBUG: settings.openai_api_key IS SET: {bool(settings.openai_api_key)}'
+    )
 
     llm_client_instance: LLMClient | None = None
     if settings.model_name and settings.openai_base_url:
