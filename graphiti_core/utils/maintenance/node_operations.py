@@ -123,10 +123,25 @@ async def extract_nodes(
                 prompt_library.extract_nodes.extract_json(context), response_model=ExtractedEntities
             )
 
-        extracted_entities: list[ExtractedEntity] = [
-            ExtractedEntity(**entity_types_context)
-            for entity_types_context in llm_response.get('extracted_entities', [])
-        ]
+        extracted_entities_data = llm_response.get('extracted_entities', [])
+        extracted_entities: list[ExtractedEntity] = []
+        if isinstance(extracted_entities_data, list):
+            for entity_data_from_llm in extracted_entities_data:
+                if isinstance(entity_data_from_llm, dict):
+                    try:
+                        extracted_entities.append(ExtractedEntity(**entity_data_from_llm))
+                    except Exception as e:
+                        logger.error(
+                            f'Error instantiating ExtractedEntity from LLM data: {entity_data_from_llm}, Error: {e}'
+                        )
+                else:
+                    logger.warning(
+                        f'LLM returned non-dict item in extracted_entities: {entity_data_from_llm}'
+                    )
+        else:
+            logger.warning(
+                f'LLM response for extracted_entities was not a list: {extracted_entities_data}'
+            )
 
         reflexion_iterations += 1
         if reflexion_iterations < MAX_REFLEXION_ITERATIONS:
@@ -146,12 +161,18 @@ async def extract_nodes(
     filtered_extracted_entities = [entity for entity in extracted_entities if entity.name.strip()]
     end = time()
     logger.debug(f'Extracted new nodes: {filtered_extracted_entities} in {(end - start) * 1000} ms')
-    # Convert the extracted data into EntityNode objects
-    extracted_nodes = []
+    extracted_nodes_list = []
     for extracted_entity in filtered_extracted_entities:
-        entity_type_name = entity_types_context[extracted_entity.entity_type_id].get(
-            'entity_type_name'
-        )
+        entity_type_id_from_llm = extracted_entity.entity_type_id
+        entity_type_name = 'Entity'
+        if 0 <= entity_type_id_from_llm < len(entity_types_context):
+            entity_type_name = entity_types_context[entity_type_id_from_llm].get(
+                'entity_type_name', 'Entity'
+            )
+        else:
+            logger.warning(
+                f"Invalid entity_type_id {entity_type_id_from_llm} from LLM. Defaulting to 'Entity'."
+            )
 
         labels: list[str] = list({'Entity', str(entity_type_name)})
 
@@ -162,11 +183,11 @@ async def extract_nodes(
             summary='',
             created_at=utc_now(),
         )
-        extracted_nodes.append(new_node)
+        extracted_nodes_list.append(new_node)
         logger.debug(f'Created new node: {new_node.name} (UUID: {new_node.uuid})')
 
-    logger.debug(f'Extracted nodes: {[(n.name, n.uuid) for n in extracted_nodes]}')
-    return extracted_nodes
+    logger.debug(f'Extracted nodes: {[(n.name, n.uuid) for n in extracted_nodes_list]}')
+    return extracted_nodes_list
 
 
 async def dedupe_extracted_nodes(
