@@ -198,23 +198,41 @@ class OpenAIClient(LLMClient):
         try:
             if response_model:
                 logger.critical(
-                    'LLM_CLIENT: Attempting structured output. Expecting LMStudio schema (from UI) to constrain. NOT sending response_format.'
+                    f'LLM_CLIENT: Attempting structured output with response_model: {response_model.__name__}'
                 )
+
+                pydantic_schema_dict = response_model.model_json_schema()
+                request_params['response_format'] = {
+                    'type': 'json_schema',
+                    'json_schema': {
+                        'name': response_model.__name__,
+                        'strict': True,
+                        'schema': pydantic_schema_dict,
+                    },
+                }
                 logger.critical(
-                    f'LLM_REQUEST_PARAMS (for structured, no response_format): {json.dumps(request_params, indent=2)}'
+                    f'LLM_REQUEST_PARAMS (for structured with json_schema type): {json.dumps(request_params, indent=2)}'
                 )
+
                 completion = await self.client.chat.completions.create(**request_params)
                 raw_content = completion.choices[0].message.content
                 logger.critical(
-                    f'LLM_CLIENT: Raw content (expecting schema-constrained JSON from LMStudio UI): {raw_content}'
+                    f'LLM_CLIENT: Raw content received (expecting JSON string matching schema): {raw_content}'
                 )
 
                 if raw_content:
                     parsed_model = response_model.model_validate_json(raw_content)
                     llm_response = parsed_model.model_dump()
+                    logger.info(
+                        f'LLM_CLIENT: Successfully parsed raw_content into {response_model.__name__}'
+                    )
                 else:
-                    logger.error('LLM_CLIENT: Received empty content for structured parsing.')
-                    llm_response = {'error': 'LLM returned empty content for structured parsing'}
+                    logger.error(
+                        'LLM_CLIENT: Received empty content when expecting schema-constrained JSON.'
+                    )
+                    llm_response = {
+                        'error': 'LLM returned empty content for schema-constrained JSON'
+                    }
             else:
                 logger.critical(
                     'LLM_CLIENT: Using standard completions.create() for non-structured output'
