@@ -74,7 +74,6 @@ async def extract_nodes(
     start = time()
     llm_client = clients.llm_client
     llm_response = {}
-    custom_prompt = ''
     entities_missed = True
     reflexion_iterations = 0
 
@@ -85,7 +84,6 @@ async def extract_nodes(
             'entity_type_description': 'Default entity classification. Use this entity type if the entity is not one of the other listed types.',
         }
     ]
-
     entity_types_context += (
         [
             {
@@ -99,29 +97,43 @@ async def extract_nodes(
         else []
     )
 
-    context = {
+    # Initial context for the first pass of extraction
+    # Make a mutable copy for the loop if custom_prompt needs to be updated
+    current_context = {
         'episode_content': episode.content,
         'episode_timestamp': episode.valid_at.isoformat(),
-        'previous_episodes': [ep.content for ep in previous_episodes],
-        'custom_prompt': custom_prompt,
+        'previous_episodes': [],  # DEBUG: Start with no previous episodes for this prompt
+        'custom_prompt': '',  # DEBUG: Start with no custom prompt
         'entity_types': entity_types_context,
         'source_description': episode.source_description,
     }
 
     while entities_missed and reflexion_iterations <= MAX_REFLEXION_ITERATIONS:
+        logger.info(f'NODE_EXTRACTION: Iteration {reflexion_iterations + 1}')
+        logger.debug(
+            f'NODE_EXTRACTION: Context for LLM call: {current_context}'
+        )  # Log the context being sent
+
         if episode.source == EpisodeType.message:
             llm_response = await llm_client.generate_response(
-                prompt_library.extract_nodes.extract_message(context),
+                prompt_library.extract_nodes.extract_message(current_context),
                 response_model=ExtractedEntities,
             )
         elif episode.source == EpisodeType.text:
             llm_response = await llm_client.generate_response(
-                prompt_library.extract_nodes.extract_text(context), response_model=ExtractedEntities
+                prompt_library.extract_nodes.extract_text(current_context),
+                response_model=ExtractedEntities,
             )
         elif episode.source == EpisodeType.json:
             llm_response = await llm_client.generate_response(
-                prompt_library.extract_nodes.extract_json(context), response_model=ExtractedEntities
+                prompt_library.extract_nodes.extract_json(current_context),
+                response_model=ExtractedEntities,
             )
+        else:
+            logger.error(f'Unknown episode source type: {episode.source} for node extraction.')
+            return []  # Or raise error
+
+        logger.debug(f'NODE_EXTRACTION: LLM Response for entities: {llm_response}')
 
         extracted_entities_data = llm_response.get('extracted_entities', [])
         extracted_entities: list[ExtractedEntity] = []
@@ -144,19 +156,30 @@ async def extract_nodes(
             )
 
         reflexion_iterations += 1
-        if reflexion_iterations < MAX_REFLEXION_ITERATIONS:
+        if (
+            reflexion_iterations < MAX_REFLEXION_ITERATIONS
+        ):  # Only do reflexion if enabled and not last iteration
+            logger.info('NODE_EXTRACTION: Performing reflexion step.')
             missing_entities = await extract_nodes_reflexion(
                 llm_client,
                 episode,
-                previous_episodes,
+                previous_episodes,  # Reflexion might still need original previous_episodes for its own context
                 [entity.name for entity in extracted_entities],
+            )
+            logger.info(
+                f'NODE_EXTRACTION: Reflexion found {len(missing_entities)} missing entities: {missing_entities}'
             )
 
             entities_missed = len(missing_entities) != 0
-
-            custom_prompt = 'Make sure that the following entities are extracted: '
-            for entity in missing_entities:
-                custom_prompt += f'\n{entity},'
+            if entities_missed:
+                current_context['custom_prompt'] = (
+                    'Make sure that the following entities are extracted: '
+                    + ', '.join(missing_entities)
+                )
+            else:
+                current_context['custom_prompt'] = ''  # Clear custom prompt if no missed entities
+        else:
+            entities_missed = False  # Stop loop if max iterations reached or reflexion disabled
 
     filtered_extracted_entities = [entity for entity in extracted_entities if entity.name.strip()]
     end = time()
