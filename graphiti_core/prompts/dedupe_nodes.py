@@ -22,6 +22,15 @@ from pydantic import BaseModel, Field
 from .models import Message, PromptFunction, PromptVersion
 
 
+# Helper to prepare context data for json.dumps by using model_dump(mode='json')
+def _prepare_for_json(data: Any) -> Any:
+    if isinstance(data, list):
+        return [_prepare_for_json(item) for item in data]
+    if hasattr(data, 'model_dump'):  # Check if it's a Pydantic model instance
+        return data.model_dump(mode='json')
+    return data  # Return as is if not a list or Pydantic model
+
+
 class NodeDuplicate(BaseModel):
     id: int = Field(..., description='integer id of the entity')
     duplicate_idx: int = Field(
@@ -60,20 +69,20 @@ def node(context: dict[str, Any]) -> list[Message]:
             role='user',
             content=f"""
         <PREVIOUS MESSAGES>
-        {json.dumps([ep for ep in context['previous_episodes']], indent=2)}
+        {json.dumps(_prepare_for_json(context.get('previous_episodes')), indent=2)}
         </PREVIOUS MESSAGES>
         <CURRENT MESSAGE>
         {context['episode_content']}
         </CURRENT MESSAGE>
         <NEW ENTITY>
-        {json.dumps(context['extracted_node'], indent=2)}
+        {json.dumps(_prepare_for_json(context.get('extracted_node')), indent=2)}
         </NEW ENTITY>
         <ENTITY TYPE DESCRIPTION>
-        {json.dumps(context['entity_type_description'], indent=2)}
+        {json.dumps(_prepare_for_json(context.get('entity_type_description')), indent=2)}
         </ENTITY TYPE DESCRIPTION>
 
         <EXISTING ENTITIES>
-        {json.dumps(context['existing_nodes'], indent=2)}
+        {json.dumps(_prepare_for_json(context.get('existing_nodes')), indent=2)}
         </EXISTING ENTITIES>
         
         Given the above EXISTING ENTITIES and their attributes, MESSAGE, and PREVIOUS MESSAGES; Determine if the NEW ENTITY extracted from the conversation
@@ -110,7 +119,7 @@ def nodes(context: dict[str, Any]) -> list[Message]:
             role='user',
             content=f"""
         <PREVIOUS MESSAGES>
-        {json.dumps([ep for ep in context['previous_episodes']], indent=2)}
+        {json.dumps(_prepare_for_json(context.get('previous_episodes')), indent=2)}
         </PREVIOUS MESSAGES>
         <CURRENT MESSAGE>
         {context['episode_content']}
@@ -135,7 +144,7 @@ def nodes(context: dict[str, Any]) -> list[Message]:
         }}
         
         <ENTITIES>
-        {json.dumps(context['extracted_nodes'], indent=2)}
+        {json.dumps(_prepare_for_json(context.get('extracted_nodes')), indent=2)}
         </ENTITIES>
 
         For each of the above ENTITIES, determine if the entity is a duplicate of any of its duplication candidates.
@@ -172,7 +181,7 @@ def node_list(context: dict[str, Any]) -> list[Message]:
         Given the following context, deduplicate a list of nodes:
 
         Nodes:
-        {json.dumps(context['nodes'], indent=2)}
+        {json.dumps(_prepare_for_json(context.get('nodes')), indent=2)}
 
         Task:
         1. Group nodes together such that all duplicate nodes are in the same list of uuids
