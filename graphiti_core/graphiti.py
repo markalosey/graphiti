@@ -325,11 +325,15 @@ class Graphiti:
                 background_tasks.add_task(graphiti.add_episode, **episode_data.dict())
                 return {"message": "Episode processing started"}
         """
+        logger.critical(
+            f"!!!!!!!!!!!! GRAPHITI_CORE: Graphiti.add_episode CALLED for '{name}' !!!!!!!!!!!!"
+        )
         try:
             start = time()
             now = utc_now()
 
             validate_entity_types(entity_types)
+            logger.critical('GRAPHITI_CORE: entity_types validated.')
 
             previous_episodes = (
                 await self.retrieve_episodes(
@@ -341,6 +345,7 @@ class Graphiti:
                 if previous_episode_uuids is None
                 else await EpisodicNode.get_by_uuids(self.driver, previous_episode_uuids)
             )
+            logger.critical(f'GRAPHITI_CORE: Retrieved {len(previous_episodes)} previous_episodes.')
 
             episode = (
                 await EpisodicNode.get_by_uuid(self.driver, uuid)
@@ -356,21 +361,22 @@ class Graphiti:
                     valid_at=reference_time,
                 )
             )
+            logger.critical(f'GRAPHITI_CORE: Episode object prepared: {episode.uuid}')
 
-            # Create default edge type map
             edge_type_map_default = (
                 {('Entity', 'Entity'): list(edge_types.keys())}
                 if edge_types is not None
                 else {('Entity', 'Entity'): []}
             )
 
-            # Extract entities as nodes
-
+            logger.critical(
+                f'GRAPHITI_CORE: Calling extract_nodes. llm_client is set: {self.clients.llm_client is not None}, entity_types: {bool(entity_types)}'
+            )
             extracted_nodes = await extract_nodes(
                 self.clients, episode, previous_episodes, entity_types
             )
+            logger.critical(f'GRAPHITI_CORE: Extracted {len(extracted_nodes)} nodes.')
 
-            # Extract edges and resolve nodes
             (nodes, uuid_map), extracted_edges = await semaphore_gather(
                 resolve_extracted_nodes(
                     self.clients,
@@ -383,8 +389,12 @@ class Graphiti:
                     self.clients, episode, extracted_nodes, previous_episodes, group_id, edge_types
                 ),
             )
+            logger.critical(
+                f'GRAPHITI_CORE: Resolved {len(nodes)} nodes, extracted {len(extracted_edges)} edges.'
+            )
 
             edges = resolve_edge_pointers(extracted_edges, uuid_map)
+            logger.critical(f'GRAPHITI_CORE: Edges pointers resolved.')
 
             (resolved_edges, invalidated_edges), hydrated_nodes = await semaphore_gather(
                 resolve_extracted_edges(
@@ -399,22 +409,27 @@ class Graphiti:
                     self.clients, nodes, episode, previous_episodes, entity_types
                 ),
             )
+            logger.critical(
+                f'GRAPHITI_CORE: Edges resolved ({len(resolved_edges)} valid, {len(invalidated_edges)} invalidated), nodes hydrated ({len(hydrated_nodes)}).'
+            )
 
             entity_edges = resolved_edges + invalidated_edges
-
             episodic_edges = build_episodic_edges(nodes, episode, now)
-
             episode.entity_edges = [edge.uuid for edge in entity_edges]
 
             if not self.store_raw_episode_content:
                 episode.content = ''
 
+            logger.critical(
+                f'GRAPHITI_CORE: Calling add_nodes_and_edges_bulk. Embedder is set: {self.embedder is not None}'
+            )
             await add_nodes_and_edges_bulk(
                 self.driver, [episode], episodic_edges, hydrated_nodes, entity_edges, self.embedder
             )
+            logger.critical('GRAPHITI_CORE: add_nodes_and_edges_bulk completed.')
 
-            # Update any communities
             if update_communities:
+                logger.critical('GRAPHITI_CORE: Updating communities.')
                 await semaphore_gather(
                     *[
                         update_community(self.driver, self.llm_client, self.embedder, node)
@@ -422,11 +437,17 @@ class Graphiti:
                     ]
                 )
             end = time()
-            logger.info(f'Completed add_episode in {(end - start) * 1000} ms')
+            logger.critical(
+                f'GRAPHITI_CORE: Completed Graphiti.add_episode in {(end - start) * 1000} ms'
+            )
 
             return AddEpisodeResults(episode=episode, nodes=nodes, edges=entity_edges)
 
         except Exception as e:
+            logger.critical(
+                f"!!!!!!!!!!!! GRAPHITI_CORE: EXCEPTION in Graphiti.add_episode for '{name}': {str(e)} !!!!!!!!!!!!",
+                exc_info=True,
+            )
             raise e
 
     #### WIP: USE AT YOUR OWN RISK ####
