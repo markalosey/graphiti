@@ -16,7 +16,8 @@ limitations under the License.
 
 import logging
 import typing
-from typing import ClassVar
+from typing import ClassVar, List, Dict, Optional, Type, Any
+import json
 
 import openai
 from openai import AsyncOpenAI
@@ -92,11 +93,11 @@ class OpenAIClient(LLMClient):
 
     async def _generate_response(
         self,
-        messages: list[Message],
-        response_model: type[BaseModel] | None = None,
-        max_tokens: int = DEFAULT_MAX_TOKENS,
-        model_size: ModelSize = ModelSize.medium,
-    ) -> dict[str, typing.Any]:
+        messages: List[Dict[str, str]],
+        response_model: Optional[Type[BaseModel]] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> Dict[str, Any]:
         openai_messages: list[ChatCompletionMessageParam] = []
         for m in messages:
             m.content = self._clean_input(m.content)
@@ -104,28 +105,101 @@ class OpenAIClient(LLMClient):
                 openai_messages.append({'role': 'user', 'content': m.content})
             elif m.role == 'system':
                 openai_messages.append({'role': 'system', 'content': m.content})
+
         try:
-            if model_size == ModelSize.small:
-                model = self.small_model or DEFAULT_SMALL_MODEL
+            if temperature is None:
+                temperature = self.temperature
+            if max_tokens is None:
+                max_tokens = self.max_tokens
+
+            if (
+                response_model
+                and hasattr(self.client, 'beta')
+                and hasattr(self.client.beta.chat.completions, 'parse')
+            ):
+                # This is the path that was failing with llama_decode
+                logger.critical('LLM_CLIENT: Using completions.parse() with response_model')
+                try:
+                    request_params = {
+                        'model': self.model or DEFAULT_MODEL,
+                        'messages': openai_messages,
+                        'temperature': temperature,
+                        'max_tokens': max_tokens,
+                    }
+                    if response_model:
+                        request_params['response_format'] = {'type': 'json_object'}
+
+                    logger.critical(
+                        f'LLM_REQUEST_PARAMS: {json.dumps(request_params, indent=2)}'
+                    )  # Log the request
+
+                    response = await self.client.beta.chat.completions.parse(
+                        **request_params,
+                        response_model=response_model,  # type: ignore[arg-type]
+                    )
+                    # If parse() returns a Pydantic model, convert to dict for consistency
+                    # Or handle Pydantic model directly if downstream code expects it
+                    # Assuming downstream expects a dict for now
+                    if hasattr(response, 'model_dump'):
+                        llm_response = response.model_dump()
+                    else:
+                        # This case should ideally not happen if parse() works as expected with response_model
+                        logger.warning(
+                            'completions.parse() did not return a Pydantic model. LLM output might be raw.'
+                        )
+                        llm_response = {'raw_response': str(response)}  # Fallback
+
+                except Exception as e:
+                    logger.error(
+                        f'LLM_CLIENT: Error during completions.parse(): {str(e)}', exc_info=True
+                    )
+                    # Attempt to get raw response if parse fails, for debugging
+                    try:
+                        del request_params['response_format']  # Remove json_object for raw call
+                        # Might need to remove other params not valid for a raw call
+                        raw_completion = await self.client.chat.completions.create(**request_params)
+                        raw_content = raw_completion.choices[0].message.content
+                        logger.error(
+                            f'LLM_CLIENT: Raw LLM response on parse() failure: {raw_content}'
+                        )
+                        llm_response = {
+                            'error_during_parse': str(e),
+                            'raw_llm_output_attempt': raw_content,
+                        }
+                    except Exception as raw_e:
+                        logger.error(
+                            f'LLM_CLIENT: Failed to get raw response after parse() error: {str(raw_e)}'
+                        )
+                        llm_response = {
+                            'error_during_parse': str(e),
+                            'raw_llm_output_attempt_failed': str(raw_e),
+                        }
+                    # Re-raise the original parsing/request error if you want the calling code to handle it
+                    # For now, returning the error dict to see it in logs and potentially in tool response
             else:
-                model = self.model or DEFAULT_MODEL
+                # Fallback or standard non-parsing path
+                logger.critical('LLM_CLIENT: Using standard completions.create()')
+                completion = await self.client.chat.completions.create(
+                    model=self.model or DEFAULT_MODEL,
+                    messages=openai_messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                raw_content = completion.choices[0].message.content
+                logger.debug(f'LLM Raw Content: {raw_content}')
+                if response_model:
+                    try:
+                        llm_response = json.loads(raw_content or '{}')
+                    except json.JSONDecodeError:
+                        logger.error(f'Failed to parse LLM JSON output: {raw_content}')
+                        llm_response = {
+                            'error': 'LLM output was not valid JSON',
+                            'raw_content': raw_content,
+                        }
+                else:
+                    llm_response = {'content': raw_content}
 
-            response = await self.client.beta.chat.completions.parse(
-                model=model,
-                messages=openai_messages,
-                temperature=self.temperature,
-                max_tokens=max_tokens or self.max_tokens,
-                response_format=response_model,  # type: ignore
-            )
-
-            response_object = response.choices[0].message
-
-            if response_object.parsed:
-                return response_object.parsed.model_dump()
-            elif response_object.refusal:
-                raise RefusalError(response_object.refusal)
-            else:
-                raise Exception(f'Invalid response from LLM: {response_object.model_dump()}')
+            return llm_response
         except openai.LengthFinishReasonError as e:
             raise Exception(f'Output length exceeded max tokens {self.max_tokens}: {e}') from e
         except openai.RateLimitError as e:
@@ -152,9 +226,7 @@ class OpenAIClient(LLMClient):
 
         while retry_count <= self.MAX_RETRIES:
             try:
-                response = await self._generate_response(
-                    messages, response_model, max_tokens, model_size
-                )
+                response = await self._generate_response(messages, response_model, max_tokens)
                 return response
             except (RateLimitError, RefusalError):
                 # These errors should not trigger retries
