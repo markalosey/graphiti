@@ -18,6 +18,7 @@ import logging
 import typing
 from typing import ClassVar, List, Dict, Optional, Type, Any
 import json
+import asyncio
 
 import openai
 from openai import AsyncOpenAI
@@ -100,121 +101,105 @@ class OpenAIClient(LLMClient):
     ) -> Dict[str, Any]:
         openai_messages: list[ChatCompletionMessageParam] = []
         for m in messages:
-            m.content = self._clean_input(m.content)
-            if m.role == 'user':
-                openai_messages.append({'role': 'user', 'content': m.content})
-            elif m.role == 'system':
-                openai_messages.append({'role': 'system', 'content': m.content})
+            if m.get('role') == 'user':
+                openai_messages.append({'role': 'user', 'content': m.get('content')})
+            elif m.get('role') == 'assistant':
+                openai_messages.append({'role': 'assistant', 'content': m.get('content')})
+            elif m.get('role') == 'system':
+                openai_messages.append({'role': 'system', 'content': m.get('content')})
+
+        effective_model = self.model or DEFAULT_MODEL
+        effective_temperature = temperature if temperature is not None else self.temperature
+        effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
+
+        request_params = {
+            'model': effective_model,
+            'messages': openai_messages,
+            'temperature': effective_temperature,
+            'max_tokens': effective_max_tokens,
+        }
+
+        raw_content = None
+        llm_response = {}
+
+        logger.critical(f'LLM_REQUEST_PARAMS: {json.dumps(request_params, indent=2)}')
 
         try:
-            if temperature is None:
-                temperature = self.temperature
-            if max_tokens is None:
-                max_tokens = self.max_tokens
-
-            if (
-                response_model
-                and hasattr(self.client, 'beta')
-                and hasattr(self.client.beta.chat.completions, 'parse')
-            ):
-                # This is the path that was failing with llama_decode
-                logger.critical('LLM_CLIENT: Using completions.parse() with response_model')
-                try:
-                    request_params = {
-                        'model': self.model or DEFAULT_MODEL,
-                        'messages': openai_messages,
-                        'temperature': temperature,
-                        'max_tokens': max_tokens,
-                    }
-                    if response_model:
-                        request_params['response_format'] = {'type': 'json_object'}
-
-                    logger.critical(
-                        f'LLM_REQUEST_PARAMS: {json.dumps(request_params, indent=2)}'
-                    )  # Log the request
-
-                    response = await self.client.beta.chat.completions.parse(
-                        **request_params,
-                        response_model=response_model,  # type: ignore[arg-type]
-                    )
-                    # If parse() returns a Pydantic model, convert to dict for consistency
-                    # Or handle Pydantic model directly if downstream code expects it
-                    # Assuming downstream expects a dict for now
-                    if hasattr(response, 'model_dump'):
-                        llm_response = response.model_dump()
-                    else:
-                        # This case should ideally not happen if parse() works as expected with response_model
-                        logger.warning(
-                            'completions.parse() did not return a Pydantic model. LLM output might be raw.'
-                        )
-                        llm_response = {'raw_response': str(response)}  # Fallback
-
-                except Exception as e:
-                    logger.error(
-                        f'LLM_CLIENT: Error during completions.parse(): {str(e)}', exc_info=True
-                    )
-                    # Attempt to get raw response if parse fails, for debugging
-                    try:
-                        del request_params['response_format']  # Remove json_object for raw call
-                        # Might need to remove other params not valid for a raw call
-                        raw_completion = await self.client.chat.completions.create(**request_params)
-                        raw_content = raw_completion.choices[0].message.content
-                        logger.error(
-                            f'LLM_CLIENT: Raw LLM response on parse() failure: {raw_content}'
-                        )
-                        llm_response = {
-                            'error_during_parse': str(e),
-                            'raw_llm_output_attempt': raw_content,
-                        }
-                    except Exception as raw_e:
-                        logger.error(
-                            f'LLM_CLIENT: Failed to get raw response after parse() error: {str(raw_e)}'
-                        )
-                        llm_response = {
-                            'error_during_parse': str(e),
-                            'raw_llm_output_attempt_failed': str(raw_e),
-                        }
-                    # Re-raise the original parsing/request error if you want the calling code to handle it
-                    # For now, returning the error dict to see it in logs and potentially in tool response
-            else:
-                # Fallback or standard non-parsing path
-                logger.critical('LLM_CLIENT: Using standard completions.create()')
-                completion = await self.client.chat.completions.create(
-                    model=self.model or DEFAULT_MODEL,
-                    messages=openai_messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
+            if response_model:
+                logger.critical(
+                    'LLM_CLIENT: Attempting structured output via create() and model_validate_json()'
                 )
+                request_params['response_format'] = {'type': 'json_object'}
+
+                completion = await self.client.chat.completions.create(**request_params)
+                raw_content = completion.choices[0].message.content
+                logger.critical(f'LLM_CLIENT: Raw content for structured parsing: {raw_content}')
+
+                if raw_content:
+                    parsed_model = response_model.model_validate_json(raw_content)
+                    llm_response = parsed_model.model_dump()
+                else:
+                    logger.error('LLM_CLIENT: Received empty content for structured parsing.')
+                    llm_response = {'error': 'LLM returned empty content for structured parsing'}
+            else:
+                logger.critical(
+                    'LLM_CLIENT: Using standard completions.create() for non-structured output'
+                )
+                if 'response_format' in request_params:
+                    del request_params['response_format']
+                completion = await self.client.chat.completions.create(**request_params)
                 raw_content = completion.choices[0].message.content
                 logger.debug(f'LLM Raw Content: {raw_content}')
-                if response_model:
-                    try:
-                        llm_response = json.loads(raw_content or '{}')
-                    except json.JSONDecodeError:
-                        logger.error(f'Failed to parse LLM JSON output: {raw_content}')
-                        llm_response = {
-                            'error': 'LLM output was not valid JSON',
-                            'raw_content': raw_content,
-                        }
-                else:
-                    llm_response = {'content': raw_content}
+                llm_response = {'content': raw_content}
 
-            return llm_response
-        except openai.LengthFinishReasonError as e:
-            raise Exception(f'Output length exceeded max tokens {self.max_tokens}: {e}') from e
-        except openai.RateLimitError as e:
-            raise RateLimitError from e
-        except Exception as e:
-            logger.error(f'Error in generating LLM response: {e}')
-            raise
+        except openai.BadRequestError as e:
+            logger.error(f'LLM_CLIENT: OpenAI BadRequestError: {str(e)}', exc_info=True)
+            error_body = 'Unknown (response not available)'
+            if e.response and hasattr(e.response, 'text') and e.response.text:
+                error_body = e.response.text
+            elif e.response and hasattr(e.response, 'json') and callable(e.response.json):
+                try:
+                    error_body = e.response.json()
+                except:
+                    pass
+            logger.error(f'LLM_CLIENT: OpenAI BadRequestError body: {error_body}')
+            llm_response = {
+                'error': f'OpenAI API BadRequestError: {str(e)}',
+                'error_body': error_body,
+            }
+            if 'llama_decode' in str(e).lower() or (
+                isinstance(error_body, str) and 'llama_decode' in error_body.lower()
+            ):
+                logger.error('LLM_CLIENT: Encountered llama_decode error.')
+        except json.JSONDecodeError as e_json:
+            logger.error(
+                f'LLM_CLIENT: JSONDecodeError while parsing LLM response: {str(e_json)}. Raw content: {raw_content}',
+                exc_info=True,
+            )
+            llm_response = {'error': 'Failed to parse LLM JSON output', 'raw_content': raw_content}
+        except Exception as e_generic:
+            logger.error(
+                f'LLM_CLIENT: Unexpected error during LLM call or parsing: {str(e_generic)}',
+                exc_info=True,
+            )
+            raw_fallback_content = (
+                raw_content if raw_content is not None else 'Not available from initial attempt'
+            )
+            llm_response = {
+                'error': f'Unexpected error in LLM processing: {str(e_generic)}',
+                'raw_content_on_error': raw_fallback_content,
+            }
+
+        return llm_response
 
     async def generate_response(
         self,
-        messages: list[Message],
-        response_model: type[BaseModel] | None = None,
-        max_tokens: int | None = None,
-        model_size: ModelSize = ModelSize.medium,
-    ) -> dict[str, typing.Any]:
+        messages: List[Dict[str, str]],
+        response_model: Optional[Type[BaseModel]] = None,
+        max_tokens: Optional[int] = None,
+        model_size: Optional[ModelSize] = None,
+        temperature: Optional[float] = None,
+    ) -> Dict[str, Any]:
         if max_tokens is None:
             max_tokens = self.max_tokens
 
@@ -226,7 +211,9 @@ class OpenAIClient(LLMClient):
 
         while retry_count <= self.MAX_RETRIES:
             try:
-                response = await self._generate_response(messages, response_model, max_tokens)
+                response = await self._generate_response(
+                    messages, response_model, max_tokens, temperature
+                )
                 return response
             except (RateLimitError, RefusalError):
                 # These errors should not trigger retries
