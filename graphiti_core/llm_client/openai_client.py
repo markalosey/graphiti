@@ -198,17 +198,17 @@ class OpenAIClient(LLMClient):
         try:
             if response_model:
                 logger.critical(
-                    'LLM_CLIENT: Attempting structured output via create() and model_validate_json() (REMOVING response_format hint if present)'
+                    'LLM_CLIENT: Attempting structured output. Expecting LMStudio schema/grammar to be active via UI, also sending json_object hint.'
                 )
-                if 'response_format' in request_params:
-                    del request_params['response_format']
+                request_params['response_format'] = {'type': 'json_object'}
                 logger.critical(
-                    f'LLM_REQUEST_PARAMS (for structured): {json.dumps(request_params, indent=2)}'
+                    f'LLM_REQUEST_PARAMS (for structured with json_object hint): {json.dumps(request_params, indent=2)}'
                 )
-
                 completion = await self.client.chat.completions.create(**request_params)
                 raw_content = completion.choices[0].message.content
-                logger.critical(f'LLM_CLIENT: Raw content for structured parsing: {raw_content}')
+                logger.critical(
+                    f'LLM_CLIENT: Raw content (expecting schema-constrained JSON): {raw_content}'
+                )
 
                 if raw_content:
                     parsed_model = response_model.model_validate_json(raw_content)
