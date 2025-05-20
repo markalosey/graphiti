@@ -16,6 +16,8 @@ limitations under the License.
 
 import json
 from typing import Any, Protocol, TypedDict
+from datetime import datetime
+from neo4j import time as neo4j_time
 
 from pydantic import BaseModel, Field
 
@@ -26,9 +28,25 @@ from .models import Message, PromptFunction, PromptVersion
 def _prepare_for_json(data: Any) -> Any:
     if isinstance(data, list):
         return [_prepare_for_json(item) for item in data]
-    if hasattr(data, 'model_dump'):  # Check if it's a Pydantic model instance
+    elif isinstance(data, dict):
+        return {key: _prepare_for_json(value) for key, value in data.items()}
+    elif hasattr(data, 'model_dump'):  # Check if it's a Pydantic model instance
         return data.model_dump(mode='json')
-    return data  # Return as is if not a list or Pydantic model
+    elif (
+        isinstance(data, neo4j_time.DateTime)
+        or isinstance(data, neo4j_time.Date)
+        or isinstance(data, neo4j_time.Time)
+        or isinstance(data, neo4j_time.Duration)
+    ):
+        # For Neo4j temporal types, convert to native Python types then to ISO string
+        native_dt = data.to_native() if hasattr(data, 'to_native') else data
+        if hasattr(native_dt, 'isoformat'):
+            return native_dt.isoformat()
+        return str(native_dt)  # Fallback to string if no isoformat
+    elif isinstance(data, datetime):  # Python datetime
+        return data.isoformat()
+    # Add other type conversions if necessary (e.g., Decimal, UUID)
+    return data
 
 
 class NodeDuplicate(BaseModel):
