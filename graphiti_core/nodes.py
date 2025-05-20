@@ -585,12 +585,25 @@ def get_episodic_node_from_record(record: Any) -> EpisodicNode:
         content=record['content'],
         source=record['source'],
         entity_edges=record['entity_edges'],
-        created_at=record['created_at'],
-        valid_at=record['valid_at'],
+        created_at=record['created_at'].to_native()
+        if hasattr(record['created_at'], 'to_native')
+        else record['created_at'],
+        valid_at=record['valid_at'].to_native()
+        if hasattr(record['valid_at'], 'to_native')
+        else record['valid_at'],
     )
 
 
 def get_entity_node_from_record(record: Any) -> EntityNode:
+    created_at_val = record['created_at']
+    created_at_native = (
+        created_at_val.to_native() if hasattr(created_at_val, 'to_native') else created_at_val
+    )
+
+    name_embedding_val = record.get('name_embedding')
+    if name_embedding_val is None and record.get('attributes'):
+        name_embedding_val = record['attributes'].get('name_embedding')
+
     return EntityNode(
         uuid=record['uuid'],
         name=record['name'],
@@ -598,19 +611,28 @@ def get_entity_node_from_record(record: Any) -> EntityNode:
         summary=record['summary'],
         labels=record['labels'],
         attributes=record['attributes'],
-        created_at=record['created_at'],
-        name_embedding=record['attributes'].get('name_embedding'),
+        created_at=created_at_native,
+        name_embedding=name_embedding_val,
     )
 
 
 def get_community_node_from_record(record: Any) -> CommunityNode:
+    created_at_val = record['created_at']
+    created_at_native = (
+        created_at_val.to_native() if hasattr(created_at_val, 'to_native') else created_at_val
+    )
+
+    name_embedding_val = record.get('name_embedding')
+    if name_embedding_val is None and record.get('attributes'):
+        name_embedding_val = record['attributes'].get('name_embedding')
+
     return CommunityNode(
         uuid=record['uuid'],
         name=record['name'],
         group_id=record['group_id'],
         summary=record['summary'],
-        created_at=record['created_at'],
-        name_embedding=record['attributes'].get('name_embedding'),
+        created_at=created_at_native,
+        name_embedding=name_embedding_val,
     )
 
 
