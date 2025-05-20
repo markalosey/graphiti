@@ -25,7 +25,7 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 
-from ..prompts.models import Message
+from ..prompts.models import Message as PromptMessage
 from .client import MULTILINGUAL_EXTRACTION_RESPONSES, LLMClient
 from .config import DEFAULT_MAX_TOKENS, LLMConfig, ModelSize
 from .errors import RateLimitError, RefusalError
@@ -66,6 +66,11 @@ class OpenAIClient(LLMClient):
         cache: bool = False,
         client: typing.Any = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        model: str = DEFAULT_MODEL,
+        temperature: float = 0.7,
+        max_retries: int = MAX_RETRIES,
+        retry_delay: float = 1,
+        small_model: str = DEFAULT_SMALL_MODEL,
     ):
         """
         Initialize the OpenAIClient with the provided configuration, cache setting, and client.
@@ -74,6 +79,12 @@ class OpenAIClient(LLMClient):
             config (LLMConfig | None): The configuration for the LLM client, including API key, model, base URL, temperature, and max tokens.
             cache (bool): Whether to use caching for responses. Defaults to False.
             client (Any | None): An optional async client instance to use. If not provided, a new AsyncOpenAI client is created.
+            max_tokens (int): The maximum number of tokens to generate in a response.
+            model (str): The model name to use for generating responses.
+            temperature (float): The temperature to use for generating responses.
+            max_retries (int): The maximum number of retries for generating responses.
+            retry_delay (float): The delay between retries in seconds.
+            small_model (str): The small model name to use for generating responses.
 
         """
         # removed caching to simplify the `generate_response` override
@@ -91,22 +102,34 @@ class OpenAIClient(LLMClient):
             self.client = client
 
         self.max_tokens = max_tokens
+        self.model = model
+        self.temperature = temperature
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.small_model = small_model
+
+        # Ensure config attributes are accessed safely if config can be None
+        if config:
+            if hasattr(config, 'api_key') and not self.client.api_key:
+                self.client.api_key = config.api_key
+            if hasattr(config, 'base_url') and not self.client.base_url:
+                self.client.base_url = config.base_url
 
     async def _generate_response(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[PromptMessage],
         response_model: Optional[Type[BaseModel]] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
     ) -> Dict[str, Any]:
         openai_messages: list[ChatCompletionMessageParam] = []
         for m in messages:
-            if m.get('role') == 'user':
-                openai_messages.append({'role': 'user', 'content': m.get('content')})
-            elif m.get('role') == 'assistant':
-                openai_messages.append({'role': 'assistant', 'content': m.get('content')})
-            elif m.get('role') == 'system':
-                openai_messages.append({'role': 'system', 'content': m.get('content')})
+            if m.role == 'user':
+                openai_messages.append({'role': 'user', 'content': m.content})
+            elif m.role == 'assistant':
+                openai_messages.append({'role': 'assistant', 'content': m.content})
+            elif m.role == 'system':
+                openai_messages.append({'role': 'system', 'content': m.content})
 
         effective_model = self.model or DEFAULT_MODEL
         effective_temperature = temperature if temperature is not None else self.temperature
@@ -194,7 +217,7 @@ class OpenAIClient(LLMClient):
 
     async def generate_response(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[PromptMessage],
         response_model: Optional[Type[BaseModel]] = None,
         max_tokens: Optional[int] = None,
         model_size: Optional[ModelSize] = None,
@@ -209,7 +232,7 @@ class OpenAIClient(LLMClient):
         # Add multilingual extraction instructions
         messages[0].content += MULTILINGUAL_EXTRACTION_RESPONSES
 
-        while retry_count <= self.MAX_RETRIES:
+        while retry_count <= self.max_retries:
             try:
                 response = await self._generate_response(
                     messages, response_model, max_tokens, temperature
@@ -225,8 +248,8 @@ class OpenAIClient(LLMClient):
                 last_error = e
 
                 # Don't retry if we've hit the max retries
-                if retry_count >= self.MAX_RETRIES:
-                    logger.error(f'Max retries ({self.MAX_RETRIES}) exceeded. Last error: {e}')
+                if retry_count >= self.max_retries:
+                    logger.error(f'Max retries ({self.max_retries}) exceeded. Last error: {e}')
                     raise
 
                 retry_count += 1
@@ -240,10 +263,10 @@ class OpenAIClient(LLMClient):
                     f'the expected format and constraints.'
                 )
 
-                error_message = Message(role='user', content=error_context)
+                error_message = PromptMessage(role='user', content=error_context)
                 messages.append(error_message)
                 logger.warning(
-                    f'Retrying after application error (attempt {retry_count}/{self.MAX_RETRIES}): {e}'
+                    f'Retrying after application error (attempt {retry_count}/{self.max_retries}): {e}'
                 )
 
         # If we somehow get here, raise the last error
