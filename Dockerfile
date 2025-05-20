@@ -27,6 +27,9 @@ RUN poetry install --no-interaction --no-ansi --only main --no-root
 
 FROM python:3.12-slim
 
+# Install curl in the final stage for healthchecks
+RUN apt-get update && apt-get install -y curl --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
 # Copy only the necessary files from the builder stage
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
