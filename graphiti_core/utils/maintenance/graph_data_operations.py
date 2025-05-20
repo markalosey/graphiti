@@ -152,7 +152,9 @@ async def retrieve_episodes(
             e.group_id AS group_id,
             e.name AS name,
             e.source_description AS source_description,
-            e.source AS source
+            e.source AS source,
+            e.entity_edges AS entity_edges,
+            e.summary_text AS summary_text
         ORDER BY e.valid_at DESC
         LIMIT $num_episodes
         """
@@ -178,6 +180,8 @@ async def retrieve_episodes(
             source=EpisodeType.from_str(record['source']),
             name=record['name'],
             source_description=record['source_description'],
+            entity_edges=record.get('entity_edges', []),
+            summary_text=record.get('summary_text'),
         )
         for record in result.records
     ]

@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 from typing import Any, Protocol, TypedDict
+import json
 
 from pydantic import BaseModel, Field
 
@@ -41,50 +42,40 @@ class Versions(TypedDict):
 
 
 def v1(context: dict[str, Any]) -> list[Message]:
-    return [
-        Message(
-            role='system',
-            content='You are an AI assistant that extracts datetime information for graph edges, focusing only on dates directly related to the establishment or change of the relationship described in the edge fact.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-            <PREVIOUS MESSAGES>
-            {context['previous_episodes']}
-            </PREVIOUS MESSAGES>
-            <CURRENT MESSAGE>
-            {context['current_episode']}
-            </CURRENT MESSAGE>
-            <REFERENCE TIMESTAMP>
-            {context['reference_timestamp']}
-            </REFERENCE TIMESTAMP>
+    sys_prompt = (
+        'You are an AI assistant that extracts specific datetime information (valid_at, invalid_at) for a given FACT, '
+        'based on context from a CURRENT_EPISODE and PREVIOUS_EPISODE_SUMMARIES. Use REFERENCE_TIMESTAMP as current time.'
+    )
+
+    user_prompt_content = f"""
+<PREVIOUS_EPISODE_SUMMARIES>
+{json.dumps([s for s in context.get('previous_episode_summaries', [])], indent=2)}
+</PREVIOUS_EPISODE_SUMMARIES>
+
+<CURRENT_EPISODE>
+{context['current_episode']}
+</CURRENT_EPISODE>
+
+<REFERENCE_TIMESTAMP>
+{context['reference_timestamp']}
+</REFERENCE_TIMESTAMP>
             
-            <FACT>
-            {context['edge_fact']}
-            </FACT>
+<FACT_TO_ANALYZE>
+{context['edge_fact']}
+</FACT_TO_ANALYZE>
 
-            IMPORTANT: Only extract time information if it is part of the provided fact. Otherwise ignore the time mentioned. Make sure to do your best to determine the dates if only the relative time is mentioned. (eg 10 years ago, 2 mins ago) based on the provided reference timestamp
-            If the relationship is not of spanning nature, but you are still able to determine the dates, set the valid_at only.
-            Definitions:
-            - valid_at: The date and time when the relationship described by the edge fact became true or was established.
-            - invalid_at: The date and time when the relationship described by the edge fact stopped being true or ended.
+TASK: Analyze FACT_TO_ANALYZE. Extract valid_at and invalid_at datetimes if explicitly stated or clearly implied by CURRENT_EPISODE or PREVIOUS_EPISODE_SUMMARIES as relating *directly* to when the FACT itself became true or ceased to be true.
 
-            Task:
-            Analyze the conversation and determine if there are dates that are part of the edge fact. Only set dates if they explicitly relate to the formation or alteration of the relationship itself.
-
-            Guidelines:
-            1. Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS.SSSSSSZ) for datetimes.
-            2. Use the reference timestamp as the current time when determining the valid_at and invalid_at dates.
-            3. If the fact is written in the present tense, use the Reference Timestamp for the valid_at date
-            4. If no temporal information is found that establishes or changes the relationship, leave the fields as null.
-            5. Do not infer dates from related events. Only use dates that are directly stated to establish or change the relationship.
-			6. For relative time mentions directly related to the relationship, calculate the actual datetime based on the reference timestamp.
-            7. If only a date is mentioned without a specific time, use 00:00:00 (midnight) for that date.
-            8. If only year is mentioned, use January 1st of that year at 00:00:00.
-            9. Always include the time zone offset (use Z for UTC if no specific time zone is mentioned).
-            10. A fact discussing that something is no longer true should have a valid_at according to when the negated fact became true.
-            """,
-        ),
+KEY_POINTS:
+- Output datetimes in ISO 8601 UTC format (YYYY-MM-DDTHH:MM:SSZ).
+- Use REFERENCE_TIMESTAMP to resolve relative times (e.g., "yesterday", "2 hours ago") for the fact's validity.
+- If fact is present tense / ongoing, valid_at is REFERENCE_TIMESTAMP.
+- If no specific temporal information for the fact's validity/invalidity, leave fields null.
+- Do NOT infer dates from unrelated events.
+"""
+    return [
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 

@@ -25,7 +25,8 @@ EPISODIC_NODE_SAVE_BULK = """
     MERGE (n:Episodic {uuid: episode.uuid})
     SET n = {uuid: episode.uuid, name: episode.name, group_id: episode.group_id, source_description: episode.source_description, 
         source: episode.source, content: episode.content, 
-    entity_edges: episode.entity_edges, created_at: episode.created_at, valid_at: episode.valid_at}
+        entity_edges: episode.entity_edges, created_at: episode.created_at, valid_at: episode.valid_at,
+        summary_text: episode.summary_text}
     RETURN n.uuid AS uuid
 """
 
@@ -39,7 +40,9 @@ ENTITY_NODE_SAVE = """
 ENTITY_NODE_SAVE_BULK = """
     UNWIND $nodes AS node
     MERGE (n:Entity {uuid: node.uuid})
-    SET n:$(node.labels)
+    // SET n:$(node.labels)  // This line is syntactically incorrect for dynamic labels from a list parameter.
+    // Commenting it out. Nodes will be merged/created with :Entity label.
+    // If other labels are critical, this needs a more robust solution (e.g., using APOC or specific SET n:Label logic).
     SET n = node
     WITH n, node CALL db.create.setNodeVectorProperty(n, "name_embedding", node.name_embedding)
     RETURN n.uuid AS uuid

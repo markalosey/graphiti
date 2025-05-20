@@ -56,105 +56,85 @@ class Versions(TypedDict):
 
 
 def edge(context: dict[str, Any]) -> list[Message]:
+    sys_prompt = 'You are an AI assistant that determines if a NEW_EDGE is a duplicate of any EXISTING_EDGES.'
+
+    user_prompt_content = f"""
+<NEW_EDGE_FACT_TO_EVALUATE>
+{context.get('extracted_edges', {}).get('fact', '')} 
+</NEW_EDGE_FACT_TO_EVALUATE>
+
+<EXISTING_RELATED_EDGES>
+{json.dumps(context.get('related_edges', []), indent=2)} 
+</EXISTING_RELATED_EDGES>
+
+TASK: Compare NEW_EDGE_FACT_TO_EVALUATE with each fact in EXISTING_RELATED_EDGES.
+- If it's a duplicate (represents the same factual statement), set 'duplicate_fact_id' to the UUID of the existing edge.
+- Otherwise, set 'duplicate_fact_id' to -1.
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that de-duplicates edges from edge lists.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-        Given the following context, determine whether the New Edge represents any of the edges in the list of Existing Edges.
-
-        <EXISTING EDGES>
-        {json.dumps(context['related_edges'], indent=2)}
-        </EXISTING EDGES>
-
-        <NEW EDGE>
-        {json.dumps(context['extracted_edges'], indent=2)}
-        </NEW EDGE>
-        
-        Task:
-        If the New Edges represents the same factual information as any edge in Existing Edges, return the id of the duplicate fact.
-        If the NEW EDGE is not a duplicate of any of the EXISTING EDGES, return -1.
-
-        Guidelines:
-        1. The facts do not need to be completely identical to be duplicates, they just need to express the same information.
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def edge_list(context: dict[str, Any]) -> list[Message]:
+    sys_prompt = "You are an AI assistant that deduplicates a provided list of EDGES based on their 'fact' text."
+
+    user_prompt_content = f"""
+<EDGES_TO_DEDUPLICATE>
+{json.dumps(context.get('edges', []), indent=2)} # Each edge has 'uuid' and 'fact'
+</EDGES_TO_DEDUPLICATE>
+
+TASK: Identify unique facts from the EDGES_TO_DEDUPLICATE.
+
+OUTPUT_FORMAT:
+Respond with a JSON object: {{"unique_facts": [ {{"uuid": "uuid_of_chosen_representative_edge", "fact": "the_unique_fact_text"}} ]}}
+- Each inner object represents one unique fact.
+- 'uuid' should be the UUID of one of the input edges that best represents this unique fact.
+- 'fact' should be the canonical text of that unique fact.
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that de-duplicates edges from edge lists.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-        Given the following context, find all of the duplicates in a list of facts:
-
-        Facts:
-        {json.dumps(context['edges'], indent=2)}
-
-        Task:
-        If any facts in Facts is a duplicate of another fact, return a new fact with one of their uuid's.
-
-        Guidelines:
-        1. identical or near identical facts are duplicates
-        2. Facts are also duplicates if they are represented by similar sentences
-        3. Facts will often discuss the same or similar relation between identical entities
-        4. The final list should have only unique facts. If 3 facts are all duplicates of each other, only one of their
-            facts should be in the response
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def resolve_edge(context: dict[str, Any]) -> list[Message]:
+    sys_prompt = (
+        'You are an AI assistant that processes a NEW_EDGE. Determine if it duplicates an EXISTING_EDGE, '
+        'identify any EDGE_INVALIDATION_CANDIDATES it contradicts, and classify its FACT_TYPE.'
+    )
+
+    user_prompt_content = f"""
+<NEW_EDGE_FACT>
+{context.get('new_edge', '')}
+</NEW_EDGE_FACT>
+
+<EXISTING_EDGES_FOR_DUPLICATION_CHECK>
+{json.dumps(context.get('existing_edges', []), indent=2)} 
+</EXISTING_EDGES_FOR_DUPLICATION_CHECK>
+
+<EDGE_INVALIDATION_CANDIDATES>
+{json.dumps(context.get('edge_invalidation_candidates', []), indent=2)}
+</EDGE_INVALIDATION_CANDIDATES>
+
+<AVAILABLE_FACT_TYPES>
+{json.dumps(context.get('edge_types', []), indent=2)} # List of {'fact_type_id', 'fact_type_name', 'fact_type_description'}
+</AVAILABLE_FACT_TYPES>
+
+TASK:
+1.  **Duplication Check**: If NEW_EDGE_FACT is a semantic duplicate of any fact in EXISTING_EDGES_FOR_DUPLICATION_CHECK, return the 'id' (UUID) of that existing edge as 'duplicate_fact_id'. Otherwise, set 'duplicate_fact_id' to -1.
+2.  **Contradiction Check**: Identify IDs (indices from the input list) of any facts in EDGE_INVALIDATION_CANDIDATES that are directly contradicted by NEW_EDGE_FACT. Return these as a list of integers in 'contradicted_facts'.
+3.  **Fact Classification**: Classify NEW_EDGE_FACT using one of the FACT_TYPE_NAMEs from AVAILABLE_FACT_TYPES. Return this as 'fact_type'. If no specific type fits well, use "DEFAULT".
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that de-duplicates facts from fact lists and determines which existing '
-            'facts are contradicted by the new fact.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-        <NEW FACT>
-        {context['new_edge']}
-        </NEW FACT>
-        
-        <EXISTING FACTS>
-        {context['existing_edges']}
-        </EXISTING FACTS>
-        <FACT INVALIDATION CANDIDATES>
-        {context['edge_invalidation_candidates']}
-        </FACT INVALIDATION CANDIDATES>
-        
-        <FACT TYPES>
-        {context['edge_types']}
-        </FACT TYPES>
-        
-
-        Task:
-        If the NEW FACT represents the same factual information as any fact in EXISTING FACTS, return the idx of the duplicate fact.
-        If the NEW FACT is not a duplicate of any of the EXISTING FACTS, return -1.
-        
-        Given the predefined FACT TYPES, determine if the NEW FACT should be classified as one of these types.
-        Return the fact type as fact_type or DEFAULT if NEW FACT is not one of the FACT TYPES.
-        
-        Based on the provided FACT INVALIDATION CANDIDATES and NEW FACT, determine which existing facts the new fact contradicts.
-        Return a list containing all idx's of the facts that are contradicted by the NEW FACT.
-        If there are no contradicted facts, return an empty list.
-
-        Guidelines:
-        1. The facts do not need to be completely identical to be duplicates, they just need to express the same information.
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
-versions: Versions = {'edge': edge, 'edge_list': edge_list, 'resolve_edge': resolve_edge}
+versions: Versions = {
+    'edge': edge,
+    'resolve_edge': resolve_edge,
+    'edge_list': edge_list,
+}

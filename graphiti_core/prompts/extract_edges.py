@@ -58,130 +58,96 @@ class Versions(TypedDict):
 
 
 def edge(context: dict[str, Any]) -> list[Message]:
-    return [
-        Message(
-            role='system',
-            content='You are an expert fact extractor that extracts fact triples from text. '
-            '1. Extracted fact triples should also be extracted with relevant date information.'
-            '2. Treat the CURRENT TIME as the time the CURRENT MESSAGE was sent. All temporal information should be extracted relative to this time.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-<PREVIOUS_MESSAGES>
-{json.dumps([ep for ep in context['previous_episodes']], indent=2)}
-</PREVIOUS_MESSAGES>
+    sys_prompt = (
+        'You are an expert fact extractor. Extract fact triples (subject-predicate-object) from CURRENT_MESSAGE. '
+        'Include relevant date information (valid_at, invalid_at in ISO 8601 UTC) if explicitly tied to the fact. '
+        'Use REFERENCE_TIME as current time. Focus on relationships between given ENTITIES.'
+    )
+
+    user_prompt_content = f"""
+<PREVIOUS_EPISODE_SUMMARIES>
+{json.dumps([s for s in context.get('previous_episode_summaries', [])], indent=2)}
+</PREVIOUS_EPISODE_SUMMARIES>
 
 <CURRENT_MESSAGE>
 {context['episode_content']}
 </CURRENT_MESSAGE>
 
 <ENTITIES>
-{context['nodes']}  # Each has: id, label (e.g., Person, Org), name, aliases
+{json.dumps(context.get('nodes', []))} # List of entity names
 </ENTITIES>
 
 <REFERENCE_TIME>
-{context['reference_time']}  # ISO 8601 (UTC); used to resolve relative time mentions
+{context['reference_time']}
 </REFERENCE_TIME>
 
-<FACT TYPES>
-{context['edge_types']}
-</FACT TYPES>
+<FACT_TYPES_TO_CONSIDER>
+{json.dumps(context.get('edge_types', []))} # List of {{'fact_type_name': ..., 'fact_type_description': ...}}
+</FACT_TYPES_TO_CONSIDER>
 
-# TASK
-Extract all factual relationships between the given ENTITIES based on the CURRENT MESSAGE.
-Only extract facts that:
-- involve two DISTINCT ENTITIES from the ENTITIES list,
-- are clearly stated or unambiguously implied in the CURRENT MESSAGE,
-    and can be represented as edges in a knowledge graph.
-- The FACT TYPES provide a list of the most important types of facts, make sure to extract any facts that
-    could be classified into one of the provided fact types
+TASK: Extract factual relationships from CURRENT_MESSAGE involving two distinct entities from the ENTITIES list.
 
-You may use information from the PREVIOUS MESSAGES only to disambiguate references or support continuity.
+KEY_POINTS:
+- Output relation_type in SCREAMING_SNAKE_CASE.
+- Ensure fact_text quotes or paraphrases source.
+- For dates: ISO 8601 UTC (YYYY-MM-DDTHH:MM:SSZ). If ongoing, valid_at = REFERENCE_TIME. If ended, set invalid_at. Null if no explicit date for the fact itself.
 
-
-{context['custom_prompt']}
-
-# EXTRACTION RULES
-
-1. Only emit facts where both the subject and object match IDs in ENTITIES.
-2. Each fact must involve two **distinct** entities.
-3. Use a SCREAMING_SNAKE_CASE string as the `relation_type` (e.g., FOUNDED, WORKS_AT).
-4. Do not emit duplicate or semantically redundant facts.
-5. The `fact_text` should quote or closely paraphrase the original source sentence(s).
-6. Use `REFERENCE_TIME` to resolve vague or relative temporal expressions (e.g., "last week").
-7. Do **not** hallucinate or infer temporal bounds from unrelated events.
-
-# DATETIME RULES
-
-- Use ISO 8601 with “Z” suffix (UTC) (e.g., 2025-04-30T00:00:00Z).
-- If the fact is ongoing (present tense), set `valid_at` to REFERENCE_TIME.
-- If a change/termination is expressed, set `invalid_at` to the relevant timestamp.
-- Leave both fields `null` if no explicit or resolvable time is stated.
-- If only a date is mentioned (no time), assume 00:00:00.
-- If only a year is mentioned, use January 1st at 00:00:00.
-        """,
-        ),
+{context.get('custom_prompt', '')}
+"""
+    return [
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def reflexion(context: dict[str, Any]) -> list[Message]:
-    sys_prompt = """You are an AI assistant that determines which facts have not been extracted from the given context"""
+    sys_prompt = 'You are an AI assistant that determines which facts have not been extracted from the given context.'
 
-    user_prompt = f"""
-<PREVIOUS MESSAGES>
-{json.dumps([ep for ep in context['previous_episodes']], indent=2)}
-</PREVIOUS MESSAGES>
-<CURRENT MESSAGE>
+    user_prompt_content = f"""
+<PREVIOUS_EPISODE_SUMMARIES>
+{json.dumps([s for s in context.get('previous_episode_summaries', [])], indent=2)}
+</PREVIOUS_EPISODE_SUMMARIES>
+<CURRENT_MESSAGE>
 {context['episode_content']}
-</CURRENT MESSAGE>
+</CURRENT_MESSAGE>
+<EXTRACTED_ENTITIES>
+{context.get('nodes', [])}
+</EXTRACTED_ENTITIES>
+<EXTRACTED_FACTS>
+{context.get('extracted_facts', [])}
+</EXTRACTED_FACTS>
 
-<EXTRACTED ENTITIES>
-{context['nodes']}
-</EXTRACTED ENTITIES>
-
-<EXTRACTED FACTS>
-{context['extracted_facts']}
-</EXTRACTED FACTS>
-
-Given the above MESSAGES, list of EXTRACTED ENTITIES entities, and list of EXTRACTED FACTS; 
-determine if any facts haven't been extracted.
+TASK: Review CURRENT_MESSAGE and related context. Identify any factual relationships between EXTRACTED_ENTITIES that were NOT in EXTRACTED_FACTS.
 """
     return [
         Message(role='system', content=sys_prompt),
-        Message(role='user', content=user_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def extract_attributes(context: dict[str, Any]) -> list[Message]:
+    sys_prompt = (
+        'You are an AI assistant that extracts attributes for a given FACT based on a MESSAGE.'
+    )
+    user_prompt_content = f"""
+<MESSAGE>
+{json.dumps(context['episode_content'], indent=2)}
+</MESSAGE>
+<REFERENCE_TIME>
+{context['reference_time']}
+</REFERENCE_TIME>
+<FACT_TO_ENRICH>
+{context['fact']}
+</FACT_TO_ENRICH>
+
+TASK: Based on the MESSAGE and REFERENCE_TIME, extract additional attributes for the FACT_TO_ENRICH, as defined by the expected response schema (which includes date fields like valid_at, invalid_at).
+KEY_POINTS:
+- Only use information from MESSAGE.
+- Adhere to ISO 8601 UTC for any dates.
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that extracts fact properties from the provided text.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-
-        <MESSAGE>
-        {json.dumps(context['episode_content'], indent=2)}
-        </MESSAGE>
-        <REFERENCE TIME>
-        {context['reference_time']}
-        </REFERENCE TIME>
-
-        Given the above MESSAGE, its REFERENCE TIME, and the following FACT, update any of its attributes based on the information provided
-        in MESSAGE. Use the provided attribute descriptions to better understand how each attribute should be determined.
-
-        Guidelines:
-        1. Do not hallucinate entity property values if they cannot be found in the current context.
-        2. Only use the provided MESSAGES and FACT to set attribute values.
-
-        <FACT>
-        {context['fact']}
-        </FACT>
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 

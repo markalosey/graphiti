@@ -143,15 +143,17 @@ class Node(BaseModel, ABC):
 
 
 class EpisodicNode(Node):
-    source: EpisodeType = Field(description='source type')
-    source_description: str = Field(description='description of the data source')
-    content: str = Field(description='raw episode data')
+    source: EpisodeType = Field(description='The source of the episode.')
+    source_description: str = Field(description='A description of the episode source.')
+    content: str = Field(description='The content of the episode.')
     valid_at: datetime = Field(
         description='datetime of when the original document was created',
     )
     entity_edges: list[str] = Field(
-        description='list of entity edges referenced in this episode',
-        default_factory=list,
+        default_factory=list, description='A list of entity edge uuids for this episode.'
+    )
+    summary_text: str | None = Field(
+        default=None, description='A concise summary of the episode content.'
     )
 
     async def save(self, driver: AsyncDriver):
@@ -591,6 +593,7 @@ def get_episodic_node_from_record(record: Any) -> EpisodicNode:
         valid_at=record['valid_at'].to_native()
         if hasattr(record['valid_at'], 'to_native')
         else record['valid_at'],
+        summary_text=record.get('summary_text'),
     )
 
 

@@ -11,6 +11,13 @@ class SearchQuery(BaseModel):
     )
     query: str
     max_facts: int = Field(default=10, description='The maximum number of facts to retrieve')
+    center_node_uuid: str | None = Field(
+        default=None, description='Optional UUID of a node to center the search around'
+    )
+    entity_filter: str | None = Field(
+        default=None,
+        description='Optional entity type to filter results (e.g., Preference, Procedure)',
+    )
 
 
 class FactResult(BaseModel):

@@ -71,198 +71,183 @@ class Versions(TypedDict):
 
 
 def extract_message(context: dict[str, Any]) -> list[Message]:
-    sys_prompt = """You are an AI assistant that extracts entity nodes from conversational messages. 
-    Your primary task is to extract and classify the speaker and other significant entities mentioned in the conversation."""
+    sys_prompt = (
+        'You are an AI assistant that extracts and classifies entity nodes from conversational messages. '
+        'Focus on the speaker and other significant entities in the CURRENT MESSAGE.'
+    )
 
-    user_prompt = f"""
-<PREVIOUS MESSAGES>
-{json.dumps([ep for ep in context['previous_episodes']], indent=2)}
-</PREVIOUS MESSAGES>
+    # Condensed instructions, relying more on schema and model capability
+    user_prompt_content = f"""
+<PREVIOUS_EPISODE_SUMMARIES>
+{json.dumps([s for s in context.get('previous_episode_summaries', [])], indent=2)}
+</PREVIOUS_EPISODE_SUMMARIES>
 
-<CURRENT MESSAGE>
+<CURRENT_MESSAGE>
 {context['episode_content']}
-</CURRENT MESSAGE>
+</CURRENT_MESSAGE>
 
-<ENTITY TYPES>
-{context['entity_types']}
-</ENTITY TYPES>
+<ENTITY_TYPES>
+{context['entity_types']} 
+</ENTITY_TYPES>
 
-Instructions:
+TASK: Extract entity nodes from CURRENT_MESSAGE. For each entity, provide its name and classify it using one of the provided ENTITY_TYPES (by entity_type_id).
 
-You are given a conversation context and a CURRENT MESSAGE. Your task is to extract **entity nodes** mentioned **explicitly or implicitly** in the CURRENT MESSAGE.
+KEY_POINTS:
+- Always extract the speaker (before the colon ':') as the first entity.
+- Extract significant entities, concepts, or actors mentioned in CURRENT_MESSAGE.
+- Exclude entities only mentioned in PREVIOUS_EPISODE_SUMMARIES.
+- Do NOT extract relationships, actions, dates, or times as entities.
+- Provide full, unambiguous names for entities.
 
-1. **Speaker Extraction**: Always extract the speaker (the part before the colon `:` in each dialogue line) as the first entity node.
-   - If the speaker is mentioned again in the message, treat both mentions as a **single entity**.
-
-2. **Entity Identification**:
-   - Extract all significant entities, concepts, or actors that are **explicitly or implicitly** mentioned in the CURRENT MESSAGE.
-   - **Exclude** entities mentioned only in the PREVIOUS MESSAGES (they are for context only).
-
-3. **Entity Classification**:
-   - Use the descriptions in ENTITY TYPES to classify each extracted entity.
-   - Assign the appropriate `entity_type_id` for each one.
-
-4. **Exclusions**:
-   - Do NOT extract entities representing relationships or actions.
-   - Do NOT extract dates, times, or other temporal information—these will be handled separately.
-
-5. **Formatting**:
-   - Be **explicit and unambiguous** in naming entities (e.g., use full names when available).
-
-{context['custom_prompt']}
+{context.get('custom_prompt', '')} 
 """
     return [
         Message(role='system', content=sys_prompt),
-        Message(role='user', content=user_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def extract_json(context: dict[str, Any]) -> list[Message]:
-    sys_prompt = """You are an AI assistant that extracts entity nodes from JSON. 
-    Your primary task is to extract and classify relevant entities from JSON files"""
+    sys_prompt = (
+        'You are an AI assistant that extracts and classifies relevant entity nodes from JSON content, '
+        'guided by a source description.'
+    )
 
-    user_prompt = f"""
-<SOURCE DESCRIPTION>:
+    user_prompt_content = f"""
+<SOURCE_DESCRIPTION>
 {context['source_description']}
-</SOURCE DESCRIPTION>
-<JSON>
+</SOURCE_DESCRIPTION>
+<JSON_CONTENT>
 {context['episode_content']}
-</JSON>
-<ENTITY TYPES>
+</JSON_CONTENT>
+<ENTITY_TYPES>
 {context['entity_types']}
-</ENTITY TYPES>
+</ENTITY_TYPES>
 
-{context['custom_prompt']}
+TASK: From the JSON_CONTENT, extract relevant entities. Classify each using an entity_type_id from ENTITY_TYPES.
 
-Given the above source description and JSON, extract relevant entities from the provided JSON.
-For each entity extracted, also determine its entity type based on the provided ENTITY TYPES and their descriptions.
-Indicate the classified entity type by providing its entity_type_id.
+KEY_POINTS:
+- Use SOURCE_DESCRIPTION for context.
+- Extract entities the JSON represents (e.g., from "name" or "user" fields).
+- Do NOT extract properties containing only dates.
 
-Guidelines:
-1. Always try to extract an entities that the JSON represents. This will often be something like a "name" or "user field
-2. Do NOT extract any properties that contain dates
+{context.get('custom_prompt', '')}
 """
     return [
         Message(role='system', content=sys_prompt),
-        Message(role='user', content=user_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def extract_text(context: dict[str, Any]) -> list[Message]:
-    sys_prompt = """You are an AI assistant that extracts entity nodes from text. 
-    Your primary task is to extract and classify the speaker and other significant entities mentioned in the provided text."""
+    sys_prompt = (
+        'You are an AI assistant that extracts and classifies entity nodes from text. '
+        'Focus on significant entities explicitly or implicitly mentioned.'
+    )
 
-    user_prompt = f"""
-<TEXT>
+    user_prompt_content = f"""
+<TEXT_CONTENT>
 {context['episode_content']}
-</TEXT>
-<ENTITY TYPES>
+</TEXT_CONTENT>
+<ENTITY_TYPES>
 {context['entity_types']}
-</ENTITY TYPES>
+</ENTITY_TYPES>
 
-Given the above text, extract entities from the TEXT that are explicitly or implicitly mentioned.
-For each entity extracted, also determine its entity type based on the provided ENTITY TYPES and their descriptions.
-Indicate the classified entity type by providing its entity_type_id.
+TASK: Extract entity nodes from TEXT_CONTENT. Classify each using an entity_type_id from ENTITY_TYPES.
 
-{context['custom_prompt']}
+KEY_POINTS:
+- Extract significant entities, concepts, or actors.
+- Do NOT extract relationships, actions, or temporal information (dates, times) as entities.
+- Provide full, unambiguous names.
 
-Guidelines:
-1. Extract significant entities, concepts, or actors mentioned in the conversation.
-2. Avoid creating nodes for relationships or actions.
-3. Avoid creating nodes for temporal information like dates, times or years (these will be added to edges later).
-4. Be as explicit as possible in your node names, using full names and avoiding abbreviations.
+{context.get('custom_prompt', '')}
 """
     return [
         Message(role='system', content=sys_prompt),
-        Message(role='user', content=user_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def reflexion(context: dict[str, Any]) -> list[Message]:
-    sys_prompt = """You are an AI assistant that determines which entities have not been extracted from the given context"""
+    sys_prompt = (
+        'You are an AI assistant that identifies entities missed in a previous extraction pass.'
+    )
 
-    user_prompt = f"""
-<PREVIOUS MESSAGES>
-{json.dumps([ep for ep in context['previous_episodes']], indent=2)}
-</PREVIOUS MESSAGES>
-<CURRENT MESSAGE>
+    user_prompt_content = f"""
+<PREVIOUS_EPISODE_SUMMARIES>
+{json.dumps([s for s in context.get('previous_episode_summaries', [])], indent=2)}
+</PREVIOUS_EPISODE_SUMMARIES>
+<CURRENT_MESSAGE>
 {context['episode_content']}
-</CURRENT MESSAGE>
+</CURRENT_MESSAGE>
+<EXTRACTED_ENTITIES>
+{context.get('extracted_entities', [])}
+</EXTRACTED_ENTITIES>
 
-<EXTRACTED ENTITIES>
-{context['extracted_entities']}
-</EXTRACTED ENTITIES>
-
-Given the above previous messages, current message, and list of extracted entities; determine if any entities haven't been
-extracted.
+TASK: Review the CURRENT_MESSAGE and PREVIOUS_EPISODE_SUMMARIES. Identify any significant entities from CURRENT_MESSAGE that are NOT in EXTRACTED_ENTITIES.
 """
     return [
         Message(role='system', content=sys_prompt),
-        Message(role='user', content=user_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def classify_nodes(context: dict[str, Any]) -> list[Message]:
-    sys_prompt = """You are an AI assistant that classifies entity nodes given the context from which they were extracted"""
+    sys_prompt = 'You are an AI assistant that classifies given entity nodes based on provided context and entity types.'
 
-    user_prompt = f"""
-    <PREVIOUS MESSAGES>
-    {json.dumps([ep for ep in context['previous_episodes']], indent=2)}
-    </PREVIOUS MESSAGES>
-    <CURRENT MESSAGE>
-    {context['episode_content']}
-    </CURRENT MESSAGE>
-    
-    <EXTRACTED ENTITIES>
-    {context['extracted_entities']}
-    </EXTRACTED ENTITIES>
-    
-    <ENTITY TYPES>
-    {context['entity_types']}
-    </ENTITY TYPES>
-    
-    Given the above conversation, extracted entities, and provided entity types and their descriptions, classify the extracted entities.
-    
-    Guidelines:
-    1. Each entity must have exactly one type
-    2. Only use the provided ENTITY TYPES as types, do not use additional types to classify entities.
-    3. If none of the provided entity types accurately classify an extracted node, the type should be set to None
+    user_prompt_content = f"""
+<PREVIOUS_EPISODE_SUMMARIES>
+{json.dumps([s for s in context.get('previous_episode_summaries', [])], indent=2)}
+</PREVIOUS_EPISODE_SUMMARIES>
+<CURRENT_MESSAGE>
+{context['episode_content']}
+</CURRENT_MESSAGE>
+<EXTRACTED_ENTITIES_TO_CLASSIFY>
+{context['extracted_entities']}
+</EXTRACTED_ENTITIES_TO_CLASSIFY>
+<ENTITY_TYPES_FOR_CLASSIFICATION>
+{context['entity_types']}
+</ENTITY_TYPES_FOR_CLASSIFICATION>
+
+TASK: For each entity in EXTRACTED_ENTITIES_TO_CLASSIFY, assign the most appropriate entity_type_id from ENTITY_TYPES_FOR_CLASSIFICATION.
+
+KEY_POINTS:
+- Each entity must have exactly one type.
+- Only use the provided ENTITY_TYPES.
+- If no type accurately classifies an entity, its type should be None (or handled by the Pydantic model if it allows null for type).
 """
     return [
         Message(role='system', content=sys_prompt),
-        Message(role='user', content=user_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
 def extract_attributes(context: dict[str, Any]) -> list[Message]:
+    sys_prompt = 'You are an AI assistant that extracts and updates entity properties (attributes and summary) based on provided text.'
+
+    user_prompt_content = f"""
+<CONTEXT_MESSAGES_AND_SUMMARIES>
+Summaries of previous relevant episodes: {json.dumps([s for s in context.get('previous_episode_summaries', [])], indent=2)}
+Content of current episode: {json.dumps(context['episode_content'], indent=2)}
+</CONTEXT_MESSAGES_AND_SUMMARIES>
+
+<ENTITY_TO_UPDATE>
+Name: {context['node']['name']}
+Existing Summary: {context['node']['summary']}
+Existing Attributes: {context['node']['attributes']}
+Entity Types: {context['node']['entity_types']}
+</ENTITY_TO_UPDATE>
+
+TASK: Based on CONTEXT_MESSAGES_AND_SUMMARIES, update the summary and extract other attributes for the ENTITY_TO_UPDATE.
+
+KEY_POINTS:
+1. Update summary with new information (max 250 words).
+2. Only extract attribute values explicitly found in the context.
+3. Refer to attribute descriptions (implicitly provided by the response_model schema) for what to extract.
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that extracts entity properties from the provided text.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-
-        <MESSAGES>
-        {json.dumps(context['previous_episodes'], indent=2)}
-        {json.dumps(context['episode_content'], indent=2)}
-        </MESSAGES>
-
-        Given the above MESSAGES and the following ENTITY, update any of its attributes based on the information provided
-        in MESSAGES. Use the provided attribute descriptions to better understand how each attribute should be determined.
-
-        Guidelines:
-        1. Do not hallucinate entity property values if they cannot be found in the current context.
-        2. Only use the provided MESSAGES and ENTITY to set attribute values.
-        3. The summary attribute represents a summary of the ENTITY, and should be updated with new information about the Entity from the MESSAGES. 
-            Summaries must be no longer than 250 words.
-        
-        <ENTITY>
-        {context['node']}
-        </ENTITY>
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 

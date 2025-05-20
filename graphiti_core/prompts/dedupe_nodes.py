@@ -77,150 +77,99 @@ class Versions(TypedDict):
     nodes: PromptFunction
 
 
-def node(context: dict[str, Any]) -> list[Message]:
+def node(context: dict[str, Any]) -> list[Message]:  # For singular node deduplication
+    sys_prompt = (
+        'You are an AI assistant that determines if a NEW_ENTITY is a duplicate of any EXISTING_ENTITIES, '
+        'considering the conversational context. The goal is to consolidate references to the same real-world object or concept.'
+    )
+
+    user_prompt_content = f"""
+<CONTEXT_INFORMATION>
+Previous Summaries: {json.dumps(_prepare_for_json(context.get('previous_episode_summaries', [])), indent=2)}
+Current Message: {context.get('episode_content', '')}
+</CONTEXT_INFORMATION>
+
+<NEW_ENTITY_TO_EVALUATE>
+{json.dumps(_prepare_for_json(context.get('extracted_node')), indent=2)}
+</NEW_ENTITY_TO_EVALUATE>
+
+<EXISTING_CANDIDATE_ENTITIES>
+{json.dumps(_prepare_for_json(context.get('existing_nodes', [])), indent=2)}
+</EXISTING_CANDIDATE_ENTITIES>
+
+TASK: Compare NEW_ENTITY_TO_EVALUATE with each entity in EXISTING_CANDIDATE_ENTITIES.
+- If NEW_ENTITY refers to the *same real-world object or concept* as an EXISTING_ENTITY, set 'duplicate_entity_id' to the ID of that existing entity.
+- Otherwise, set 'duplicate_entity_id' to -1 (indicating it's a new, distinct entity).
+- Also, provide the best consolidated 'name' for the entity (whether new or existing).
+
+KEY_POINTS:
+- Consider entity type descriptions (implicitly provided by schema) if available.
+- Do NOT merge if related but distinct, or similar names for separate concepts.
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that determines whether or not a NEW ENTITY is a duplicate of any EXISTING ENTITIES.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-        <PREVIOUS MESSAGES>
-        {json.dumps(_prepare_for_json(context.get('previous_episodes')), indent=2)}
-        </PREVIOUS MESSAGES>
-        <CURRENT MESSAGE>
-        {context['episode_content']}
-        </CURRENT MESSAGE>
-        <NEW ENTITY>
-        {json.dumps(_prepare_for_json(context.get('extracted_node')), indent=2)}
-        </NEW ENTITY>
-        <ENTITY TYPE DESCRIPTION>
-        {json.dumps(_prepare_for_json(context.get('entity_type_description')), indent=2)}
-        </ENTITY TYPE DESCRIPTION>
-
-        <EXISTING ENTITIES>
-        {json.dumps(_prepare_for_json(context.get('existing_nodes')), indent=2)}
-        </EXISTING ENTITIES>
-        
-        Given the above EXISTING ENTITIES and their attributes, MESSAGE, and PREVIOUS MESSAGES; Determine if the NEW ENTITY extracted from the conversation
-        is a duplicate entity of one of the EXISTING ENTITIES.
-        
-        Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
-
-        Do NOT mark entities as duplicates if:
-        - They are related but distinct.
-        - They have similar names or purposes but refer to separate instances or concepts.
-
-        Task:
-        If the NEW ENTITY represents a duplicate entity of any entity in EXISTING ENTITIES, set duplicate_entity_id to the
-        id of the EXISTING ENTITY that is the duplicate. 
-        
-        If the NEW ENTITY is not a duplicate of any of the EXISTING ENTITIES,
-        duplicate_entity_id should be set to -1.
-        
-        Also return the name that best describes the NEW ENTITY (whether it is the name of the NEW ENTITY, a node it
-        is a duplicate of, or a combination of the two).
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
-def nodes(context: dict[str, Any]) -> list[Message]:
+def nodes(context: dict[str, Any]) -> list[Message]:  # For plural node deduplication (batch)
+    sys_prompt = (
+        'You are an AI assistant. For each ENTITY provided (extracted from CURRENT_MESSAGE), '
+        "determine if it's a duplicate of any of its listed DUPLICATION_CANDIDATES."
+    )
+
+    user_prompt_content = f"""
+<CONTEXT_INFORMATION>
+Previous Summaries: {json.dumps(_prepare_for_json(context.get('previous_episode_summaries', [])), indent=2)}
+Current Message: {context.get('episode_content', '')}
+</CONTEXT_INFORMATION>
+
+<ENTITIES_FOR_RESOLUTION>
+{json.dumps(_prepare_for_json(context.get('extracted_nodes')), indent=2)}
+Each entity above has an 'id' (its temporary ID for this request) and a list of 'duplication_candidates' (potential existing matches from the graph, each with an 'idx').
+</ENTITIES_FOR_RESOLUTION>
+
+TASK: For each entity in ENTITIES_FOR_RESOLUTION:
+- Output its original 'id'.
+- Determine the best consolidated 'name'.
+- Set 'duplicate_idx' to the 'idx' of a candidate if it's a true duplicate (same real-world concept).
+- Set 'duplicate_idx' to -1 if it's not a duplicate of any listed candidates.
+
+KEY_POINTS:
+- Entities are duplicates if they refer to the *same real-world object or concept*.
+- Do NOT mark as duplicates if related but distinct, or similar names for separate instances.
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that determines whether or not ENTITIES extracted from a conversation are duplicates'
-            'of existing entities.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-        <PREVIOUS MESSAGES>
-        {json.dumps(_prepare_for_json(context.get('previous_episodes')), indent=2)}
-        </PREVIOUS MESSAGES>
-        <CURRENT MESSAGE>
-        {context['episode_content']}
-        </CURRENT MESSAGE>
-        
-        
-        Each of the following ENTITIES were extracted from the CURRENT MESSAGE.
-        Each entity in ENTITIES is represented as a JSON object with the following structure:
-        {{
-            id: integer id of the entity,
-            name: "name of the entity",
-            entity_type: "ontological classification of the entity",
-            entity_type_description: "Description of what the entity type represents",
-            duplication_candidates: [
-                {{
-                    idx: integer index of the candidate entity,
-                    name: "name of the candidate entity",
-                    entity_type: "ontological classification of the candidate entity",
-                    ...<additional attributes>
-                }}
-            ]
-        }}
-        
-        <ENTITIES>
-        {json.dumps(_prepare_for_json(context.get('extracted_nodes')), indent=2)}
-        </ENTITIES>
-
-        For each of the above ENTITIES, determine if the entity is a duplicate of any of its duplication candidates.
-
-        Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
-
-        Do NOT mark entities as duplicates if:
-        - They are related but distinct.
-        - They have similar names or purposes but refer to separate instances or concepts.
-
-        Task:
-        Your response will be a list called entity_resolutions which contains one entry for each entity.
-        
-        For each entity, return the id of the entity as id, the name of the entity as name, and the duplicate_idx
-        as an integer.
-        
-        - If an entity is a duplicate of one of its duplication_candidates, return the idx of the candidate it is a 
-        duplicate of.
-        - If an entity is not a duplicate of one of its duplication candidates, return the -1 as the duplication_idx
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 
-def node_list(context: dict[str, Any]) -> list[Message]:
+def node_list(
+    context: dict[str, Any],
+) -> list[Message]:  # For deduplicating within a given list of nodes
+    sys_prompt = 'You are an AI assistant that deduplicates a provided list of NODES.'
+
+    user_prompt_content = f"""
+<NODES_TO_DEDUPLICATE>
+{json.dumps(_prepare_for_json(context.get('nodes')), indent=2)}
+</NODES_TO_DEDUPLICATE>
+
+TASK: Group nodes in NODES_TO_DEDUPLICATE that refer to the same real-world entity.
+
+OUTPUT_FORMAT:
+Respond with a JSON object: {{"nodes": [ {{"uuids": ["uuid1", "uuid2_if_duplicate_of_uuid1"], "summary": "Synthesized brief summary."}}, ... ]}}
+- Each inner object represents a unique entity.
+- 'uuids': lists all UUIDs from the input that map to this unique entity.
+- 'summary': a new, synthesized summary for the unique entity.
+
+KEY_POINTS:
+- Every input UUID must appear in exactly one 'uuids' list in your output.
+- If a node has no duplicates in the input list, its 'uuids' list will contain only itself.
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that de-duplicates nodes from node lists.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-        Given the following context, deduplicate a list of nodes:
-
-        Nodes:
-        {json.dumps(_prepare_for_json(context.get('nodes')), indent=2)}
-
-        Task:
-        1. Group nodes together such that all duplicate nodes are in the same list of uuids
-        2. All duplicate uuids should be grouped together in the same list
-        3. Also return a new summary that synthesizes the summary into a new short summary
-
-        Guidelines:
-        1. Each uuid from the list of nodes should appear EXACTLY once in your response
-        2. If a node has no duplicates, it should appear in the response in a list of only one uuid
-
-        Respond with a JSON object in the following format:
-        {{
-            "nodes": [
-                {{
-                    "uuids": ["5d643020624c42fa9de13f97b1b3fa39", "node that is a duplicate of 5d643020624c42fa9de13f97b1b3fa39"],
-                    "summary": "Brief summary of the node summaries that appear in the list of names."
-                }}
-            ]
-        }}
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 

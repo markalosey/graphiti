@@ -78,6 +78,9 @@ from graphiti_core.utils.maintenance.node_operations import (
     resolve_extracted_nodes,
 )
 from graphiti_core.utils.ontology_utils.entity_types_utils import validate_entity_types
+from graphiti_core.prompts.summarize_episode import EpisodeSummary
+from graphiti_core.prompts import prompt_library
+from graphiti_core.llm_client.config import ModelSize
 
 logger = logging.getLogger(__name__)
 
@@ -419,6 +422,36 @@ class Graphiti:
 
             if not self.store_raw_episode_content:
                 episode.content = ''
+
+            # Generate summary for the current episode before bulk saving
+            if episode.content and not episode.summary_text: # Check original content for summarization
+                # Use original episode.content for summary even if it was cleared for storage
+                content_for_summary = episode_body # Use the original full body for summary
+                if not content_for_summary:
+                     logger.warning(f"GRAPHITI_CORE: content_for_summary is empty for episode {episode.uuid}, cannot generate summary.")
+                else:
+                    logger.info(f"GRAPHITI_CORE: Generating summary for episode {episode.uuid} ('{episode.name}').")
+                    summary_context = {
+                        "episode_name": episode.name,
+                        "episode_content": content_for_summary,
+                    }
+                    try:
+                        summary_response = await self.clients.llm_client.generate_response(
+                            prompt_library.summarize_episode(summary_context), # Corrected to call the function from library
+                            response_model=EpisodeSummary,
+                            model_size=ModelSize.small 
+                        )
+                        if summary_response and summary_response.get('summary'):
+                            episode.summary_text = summary_response['summary']
+                            logger.info(f"GRAPHITI_CORE: Successfully generated summary for episode {episode.uuid}.")
+                        else:
+                            logger.warning(f"GRAPHITI_CORE: LLM did not return a summary for episode {episode.uuid}. Response: {summary_response}")
+                    except Exception as e:
+                        logger.error(f"GRAPHITI_CORE: Failed to generate summary for episode {episode.uuid}: {str(e)}", exc_info=True)
+            elif episode.summary_text:
+                 logger.info(f"GRAPHITI_CORE: Summary already exists for episode {episode.uuid}.")
+            elif not episode.content:
+                 logger.info(f"GRAPHITI_CORE: No content to summarize for episode {episode.uuid}.")
 
             logger.critical(
                 f'GRAPHITI_CORE: Calling add_nodes_and_edges_bulk. Embedder is set: {self.embedder is not None}'

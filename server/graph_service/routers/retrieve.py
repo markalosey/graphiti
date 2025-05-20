@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, status
 
+from graphiti_core.search.search_filters import SearchFilters
+
 from graph_service.dto import (
     GetMemoryRequest,
     GetMemoryResponse,
@@ -16,10 +18,16 @@ router = APIRouter()
 
 @router.post('/search', status_code=status.HTTP_200_OK)
 async def search(query: SearchQuery, graphiti: ZepGraphitiDep):
+    search_filters = None
+    if query.entity_filter:
+        search_filters = SearchFilters(node_labels=[query.entity_filter])
+
     relevant_edges = await graphiti.search(
         group_ids=query.group_ids,
         query=query.query,
         num_results=query.max_facts,
+        center_node_uuid=query.center_node_uuid,
+        search_filter=search_filters,
     )
     facts = [get_fact_result_from_edge(edge) for edge in relevant_edges]
     return SearchResults(
