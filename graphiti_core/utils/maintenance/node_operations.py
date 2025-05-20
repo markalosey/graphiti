@@ -245,7 +245,6 @@ async def resolve_extracted_nodes(
 
     entity_types_dict: dict[str, BaseModel] = entity_types if entity_types is not None else {}
 
-    # Prepare context for LLM
     extracted_nodes_context = [
         {
             'id': i,
@@ -273,9 +272,7 @@ async def resolve_extracted_nodes(
     context = {
         'extracted_nodes': extracted_nodes_context,
         'episode_content': episode.content if episode is not None else '',
-        'previous_episodes': [ep.content for ep in previous_episodes]
-        if previous_episodes is not None
-        else [],
+        'previous_episodes': [],  # <--- TEMPORARY CHANGE FOR DEBUGGING CONTEXT LENGTH
     }
 
     llm_response = await llm_client.generate_response(
@@ -291,6 +288,11 @@ async def resolve_extracted_nodes(
         resolution_id = resolution.get('id', -1)
         duplicate_idx = resolution.get('duplicate_idx', -1)
 
+        # Ensure resolution_id is within bounds of extracted_nodes
+        if not (0 <= resolution_id < len(extracted_nodes)):
+            logger.warning(f'Resolved node id {resolution_id} out of bounds.')
+            continue  # Skip this resolution if id is invalid
+
         extracted_node = extracted_nodes[resolution_id]
 
         resolved_node = (
@@ -299,10 +301,22 @@ async def resolve_extracted_nodes(
             else extracted_node
         )
 
-        resolved_node.name = resolution.get('name')
+        # Ensure resolved_node is not None before trying to access attributes
+        if resolved_node:
+            new_name = resolution.get('name')
+            if new_name:
+                resolved_node.name = new_name
+            else:
+                logger.warning(
+                    f'LLM did not return a name for resolved node based on id {resolution_id}, keeping original: {resolved_node.name}'
+                )
 
-        resolved_nodes.append(resolved_node)
-        uuid_map[extracted_node.uuid] = resolved_node.uuid
+            resolved_nodes.append(resolved_node)
+            uuid_map[extracted_node.uuid] = resolved_node.uuid
+        else:
+            logger.warning(
+                f'Could not determine resolved_node for id {resolution_id} and duplicate_idx {duplicate_idx}. Original extracted node: {extracted_node.name}'
+            )
 
     logger.debug(f'Resolved nodes: {[(n.name, n.uuid) for n in resolved_nodes]}')
 
