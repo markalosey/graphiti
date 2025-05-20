@@ -198,9 +198,13 @@ class OpenAIClient(LLMClient):
         try:
             if response_model:
                 logger.critical(
-                    'LLM_CLIENT: Attempting structured output via create() and model_validate_json()'
+                    'LLM_CLIENT: Attempting structured output via create() and model_validate_json() (REMOVING response_format hint if present)'
                 )
-                request_params['response_format'] = {'type': 'json_object'}
+                if 'response_format' in request_params:
+                    del request_params['response_format']
+                logger.critical(
+                    f'LLM_REQUEST_PARAMS (for structured): {json.dumps(request_params, indent=2)}'
+                )
 
                 completion = await self.client.chat.completions.create(**request_params)
                 raw_content = completion.choices[0].message.content
@@ -218,6 +222,9 @@ class OpenAIClient(LLMClient):
                 )
                 if 'response_format' in request_params:
                     del request_params['response_format']
+                logger.critical(
+                    f'LLM_REQUEST_PARAMS (for non-structured): {json.dumps(request_params, indent=2)}'
+                )
                 completion = await self.client.chat.completions.create(**request_params)
                 raw_content = completion.choices[0].message.content
                 logger.debug(f'LLM Raw Content: {raw_content}')
