@@ -163,13 +163,13 @@ async def get_graphiti(settings: ZepEnvDep):
     if settings.embedding_name and settings.openai_base_url:
         embedder_core_config = OpenAIEmbedderConfig(
             api_key=settings.openai_api_key or 'dummy-key',
-            model=settings.embedding_name,
+            model=settings.embedding_name,  # This correctly maps to OpenAIEmbedderConfig.embedding_model
             base_url=settings.openai_base_url,
         )
         embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
         logger.critical(
-            f'CRITICAL_EMBEDDER_CONFIG: Embedder Client configured using config.model: {embedder_core_config.model} at {embedder_core_config.base_url}'
-        )
+            f'CRITICAL_EMBEDDER_CONFIG: Embedder Client configured using config.embedding_model: {embedder_core_config.embedding_model} at {embedder_core_config.base_url}'
+        )  # Corrected to .embedding_model
     else:
         logger.critical(
             f'CRITICAL_EMBEDDER_CONFIG_FAIL: Embedder Client NOT configured due to missing embedding_name or openai_base_url. Embeddings will not be generated.'
@@ -198,6 +198,7 @@ async def initialize_graphiti(settings: Settings):
             base_url=settings.openai_base_url,
         )
         llm_client_instance = OpenAIClient(config=llm_core_config)
+        # Optional: Add similar CRITICAL log for LLM client init here if desired
     else:
         logger.info(
             'LLM Client not configured for initial index build (model_name or openai_base_url missing).'
@@ -211,6 +212,7 @@ async def initialize_graphiti(settings: Settings):
             base_url=settings.openai_base_url,
         )
         embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
+        # Optional: Add similar CRITICAL log for Embedder client init here using embedder_core_config.embedding_model
     else:
         logger.info(
             'Embedder Client not configured for initial index build (embedding_name or openai_base_url missing).'
