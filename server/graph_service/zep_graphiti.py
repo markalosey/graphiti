@@ -130,10 +130,21 @@ class ZepGraphiti(Graphiti):
 # This is the dependency injector that FastAPI routes will use
 async def get_graphiti(settings: ZepEnvDep):
     logger.critical('!!!!!!!!!!!! GET_GRAPHITI CALLED !!!!!!!!!!!!')
+    logger.info(
+        f"DEBUG: settings.model_name = '{settings.model_name}' (type: {type(settings.model_name)})"
+    )
+    logger.info(
+        f"DEBUG: settings.embedding_name = '{settings.embedding_name}' (type: {type(settings.embedding_name)})"
+    )
+    logger.info(
+        f"DEBUG: settings.openai_base_url = '{settings.openai_base_url}' (type: {type(settings.openai_base_url)})"
+    )
+    logger.info(f'DEBUG: settings.openai_api_key IS SET: {bool(settings.openai_api_key)}')
+
     llm_client_instance: LLMClient | None = None
-    if settings.model_name and settings.openai_base_url:  # Ensure base_url is present for LMStudio
+    if settings.model_name and settings.openai_base_url:
         llm_core_config = CoreLLMConfig(
-            api_key=settings.openai_api_key or 'dummy-key',  # Ensure API key is str
+            api_key=settings.openai_api_key or 'dummy-key',
             model=settings.model_name,
             base_url=settings.openai_base_url,
         )
@@ -147,9 +158,9 @@ async def get_graphiti(settings: ZepEnvDep):
         )
 
     embedder_client_instance: EmbedderClient | None = None
-    if settings.embedding_name and settings.openai_base_url:  # Ensure base_url for LMStudio
+    if settings.embedding_name and settings.openai_base_url:
         embedder_core_config = OpenAIEmbedderConfig(
-            api_key=settings.openai_api_key or 'dummy-key',  # Ensure API key is str
+            api_key=settings.openai_api_key or 'dummy-key',
             model=settings.embedding_name,
             base_url=settings.openai_base_url,
         )
@@ -169,7 +180,6 @@ async def get_graphiti(settings: ZepEnvDep):
         llm_client=llm_client_instance,
         embedder_client=embedder_client_instance,
     )
-
     try:
         yield client
     finally:
