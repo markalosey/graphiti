@@ -150,7 +150,7 @@ async def get_graphiti(settings: ZepEnvDep):
             model=settings.model_name,
             base_url=settings.openai_base_url,
         )
-        llm_client_instance = OpenAIClient(config=llm_core_config)
+        llm_client_instance = OpenAIClient(config=llm_core_config, model=settings.model_name)
         logger.critical(
             f'CRITICAL_LLM_CONFIG: LLM Client configured for model: {settings.model_name} at {settings.openai_base_url}'
         )
@@ -166,7 +166,9 @@ async def get_graphiti(settings: ZepEnvDep):
             model=settings.embedding_name,
             base_url=settings.openai_base_url,
         )
-        embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
+        embedder_client_instance = OpenAIEmbedder(
+            config=embedder_core_config, model=settings.embedding_name
+        )
         logger.critical(
             f'CRITICAL_EMBEDDER_CONFIG: Embedder Client configured for model: {settings.embedding_name} at {settings.openai_base_url}'
         )
@@ -197,7 +199,7 @@ async def initialize_graphiti(settings: Settings):
             model=settings.model_name,
             base_url=settings.openai_base_url,
         )
-        llm_client_instance = OpenAIClient(config=llm_core_config)
+        llm_client_instance = OpenAIClient(config=llm_core_config, model=settings.model_name)
     else:
         logger.info(
             'LLM Client not configured for initial index build (model_name or openai_base_url missing).'
@@ -210,7 +212,9 @@ async def initialize_graphiti(settings: Settings):
             model=settings.embedding_name,
             base_url=settings.openai_base_url,
         )
-        embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
+        embedder_client_instance = OpenAIEmbedder(
+            config=embedder_core_config, model=settings.embedding_name
+        )
     else:
         logger.info(
             'Embedder Client not configured for initial index build (embedding_name or openai_base_url missing).'
