@@ -339,21 +339,26 @@ class EntityNode(Node):
         self.name_embedding = records[0]['name_embedding']
 
     async def save(self, driver: AsyncDriver):
-        entity_data: dict[str, Any] = {
+        # Prepare properties for the main SET clause, excluding name_embedding
+        entity_props: dict[str, Any] = {
             'uuid': self.uuid,
             'name': self.name,
-            'name_embedding': self.name_embedding,
+            # 'name_embedding': self.name_embedding, # Excluded from main props
             'group_id': self.group_id,
             'summary': self.summary,
             'created_at': self.created_at,
         }
+        entity_props.update(self.attributes or {})
 
-        entity_data.update(self.attributes or {})
+        # Ensure labels always include 'Entity'
+        final_labels = list(set(self.labels + ['Entity']))
 
         result = await driver.execute_query(
             ENTITY_NODE_SAVE,
-            labels=self.labels + ['Entity'],
-            entity_data=entity_data,
+            labels=final_labels,  # Pass the final list of labels
+            entity_props=entity_props,  # Properties for general SET
+            uuid_param=self.uuid,  # Explicit uuid for MERGE
+            name_embedding_param=self.name_embedding,  # Embedding passed separately
             database_=DEFAULT_DATABASE,
         )
 
