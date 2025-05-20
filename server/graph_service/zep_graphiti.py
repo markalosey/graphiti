@@ -66,10 +66,8 @@ class ZepGraphiti(Graphiti):
         password: str,
         llm_client: LLMClient | None = None,
         embedder_client: EmbedderClient | None = None,
-    ):  # Added embedder_client
-        super().__init__(
-            uri, user, password, llm_client=llm_client, embedder=embedder_client
-        )  # Assumed 'embedder' kwarg
+    ):
+        super().__init__(uri, user, password, llm_client=llm_client, embedder=embedder_client)
 
     async def save_entity_node(self, name: str, uuid: str, group_id: str, summary: str = ''):
         new_node = EntityNode(
