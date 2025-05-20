@@ -146,19 +146,19 @@ async def get_graphiti(settings: ZepEnvDep):
         )
 
     embedder_client_instance: EmbedderClient | None = None
-    if settings.embedding_model_name and settings.openai_base_url:  # Ensure base_url for LMStudio
+    if settings.embedding_name and settings.openai_base_url:  # Ensure base_url for LMStudio
         embedder_core_config = OpenAIEmbedderConfig(
             api_key=settings.openai_api_key or 'dummy-key',  # Ensure API key is str
-            model=settings.embedding_model_name,
+            model=settings.embedding_name,
             base_url=settings.openai_base_url,
         )
         embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
         logger.info(
-            f'Embedder Client configured for model: {settings.embedding_model_name} at {settings.openai_base_url}'
+            f'Embedder Client configured for model: {settings.embedding_name} at {settings.openai_base_url}'
         )
     else:
         logger.warning(
-            'Embedder Client NOT configured due to missing embedding_model_name or openai_base_url. Embeddings will not be generated.'
+            'Embedder Client NOT configured due to missing embedding_name or openai_base_url. Embeddings will not be generated.'
         )
 
     client = ZepGraphiti(
@@ -190,16 +190,16 @@ async def initialize_graphiti(settings: Settings):
         )
 
     embedder_client_instance: EmbedderClient | None = None
-    if settings.embedding_model_name and settings.openai_base_url:
+    if settings.embedding_name and settings.openai_base_url:
         embedder_core_config = OpenAIEmbedderConfig(
             api_key=settings.openai_api_key or 'dummy-key',
-            model=settings.embedding_model_name,
+            model=settings.embedding_name,
             base_url=settings.openai_base_url,
         )
         embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
     else:
         logger.info(
-            'Embedder Client not configured for initial index build (embedding_model_name or openai_base_url missing).'
+            'Embedder Client not configured for initial index build (embedding_name or openai_base_url missing).'
         )
 
     temp_client_for_init = ZepGraphiti(
