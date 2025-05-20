@@ -645,8 +645,7 @@ async def create_entity_node_embeddings(embedder: EmbedderClient, nodes: list[En
     logger.critical(
         f'BULK_NODE_EMBED: Generating embeddings for {len(texts_to_embed)} node names via create_batch.'
     )
-    # Use create_batch which should return List[List[float]]
-    list_of_embeddings = await embedder.create_batch(input_data=texts_to_embed)
+    list_of_embeddings = await embedder.create_batch(texts_to_embed)
 
     embed_idx = 0
     for node in nodes:

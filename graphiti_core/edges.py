@@ -530,8 +530,7 @@ async def create_entity_edge_embeddings(embedder: EmbedderClient, edges: list[En
     logger.critical(
         f'BULK_EDGE_EMBED: Generating embeddings for {len(texts_to_embed)} edge facts via create_batch.'
     )
-    # Use create_batch which should return List[List[float]]
-    list_of_embeddings = await embedder.create_batch(input_data=texts_to_embed)
+    list_of_embeddings = await embedder.create_batch(texts_to_embed)
 
     embed_idx = 0
     for edge in edges:
