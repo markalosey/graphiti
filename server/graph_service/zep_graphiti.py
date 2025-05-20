@@ -150,9 +150,9 @@ async def get_graphiti(settings: ZepEnvDep):
             model=settings.model_name,
             base_url=settings.openai_base_url,
         )
-        llm_client_instance = OpenAIClient(config=llm_core_config, model=settings.model_name)
+        llm_client_instance = OpenAIClient(config=llm_core_config)
         logger.critical(
-            f'CRITICAL_LLM_CONFIG: LLM Client configured for model: {settings.model_name} at {settings.openai_base_url}'
+            f'CRITICAL_LLM_CONFIG: LLM Client configured using config.model: {llm_core_config.model} at {llm_core_config.base_url}'
         )
     else:
         logger.critical(
@@ -166,11 +166,9 @@ async def get_graphiti(settings: ZepEnvDep):
             model=settings.embedding_name,
             base_url=settings.openai_base_url,
         )
-        embedder_client_instance = OpenAIEmbedder(
-            config=embedder_core_config, model=settings.embedding_name
-        )
+        embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
         logger.critical(
-            f'CRITICAL_EMBEDDER_CONFIG: Embedder Client configured for model: {settings.embedding_name} at {settings.openai_base_url}'
+            f'CRITICAL_EMBEDDER_CONFIG: Embedder Client configured using config.model: {embedder_core_config.model} at {embedder_core_config.base_url}'
         )
     else:
         logger.critical(
@@ -199,7 +197,7 @@ async def initialize_graphiti(settings: Settings):
             model=settings.model_name,
             base_url=settings.openai_base_url,
         )
-        llm_client_instance = OpenAIClient(config=llm_core_config, model=settings.model_name)
+        llm_client_instance = OpenAIClient(config=llm_core_config)
     else:
         logger.info(
             'LLM Client not configured for initial index build (model_name or openai_base_url missing).'
@@ -212,9 +210,7 @@ async def initialize_graphiti(settings: Settings):
             model=settings.embedding_name,
             base_url=settings.openai_base_url,
         )
-        embedder_client_instance = OpenAIEmbedder(
-            config=embedder_core_config, model=settings.embedding_name
-        )
+        embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
     else:
         logger.info(
             'Embedder Client not configured for initial index build (embedding_name or openai_base_url missing).'
@@ -224,8 +220,8 @@ async def initialize_graphiti(settings: Settings):
         uri=settings.neo4j_uri,
         user=settings.neo4j_user,
         password=settings.neo4j_password,
-        llm_client=llm_client_instance,  # Pass even if None, Graphiti should handle
-        embedder_client=embedder_client_instance,  # Pass even if None
+        llm_client=llm_client_instance,
+        embedder_client=embedder_client_instance,
     )
     try:
         logger.info('Building indices and constraints for Graphiti API service...')
