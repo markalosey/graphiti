@@ -129,6 +129,7 @@ class ZepGraphiti(Graphiti):
 
 # This is the dependency injector that FastAPI routes will use
 async def get_graphiti(settings: ZepEnvDep):
+    logger.critical('!!!!!!!!!!!! GET_GRAPHITI CALLED !!!!!!!!!!!!')
     llm_client_instance: LLMClient | None = None
     if settings.model_name and settings.openai_base_url:  # Ensure base_url is present for LMStudio
         llm_core_config = CoreLLMConfig(
@@ -176,6 +177,7 @@ async def get_graphiti(settings: ZepEnvDep):
 
 
 async def initialize_graphiti(settings: Settings):
+    logger.critical('!!!!!!!!!!!! INITIALIZE_GRAPHITI CALLED !!!!!!!!!!!!')
     llm_client_instance: LLMClient | None = None
     if settings.model_name and settings.openai_base_url:
         llm_core_config = CoreLLMConfig(
