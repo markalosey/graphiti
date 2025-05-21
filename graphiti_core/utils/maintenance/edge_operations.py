@@ -402,6 +402,7 @@ async def resolve_extracted_edge(
     episode: EpisodicNode,
     edge_types: dict[str, BaseModel] | None = None,
 ) -> tuple[EntityEdge, list[EntityEdge]]:
+    logger.info('HOT RELOAD CORE TEST - edge_operations.py V6 - In resolve_extracted_edge')
     if len(related_edges) == 0 and len(existing_edges) == 0:
         return extracted_edge, []
 
@@ -477,25 +478,23 @@ async def resolve_extracted_edge(
 
     edge.name = resolved_fact_type
 
-    invalidated_edge_uuids: list[str] = []
+    edges_to_invalidate: list[EntityEdge] = []
     if existing_edges and contradicted_fact_indices:
         for idx in contradicted_fact_indices:
             if 0 <= idx < len(existing_edges):
                 candidate_to_invalidate = existing_edges[idx]
-                invalidated_uuid = candidate_to_invalidate.uuid
-                if invalidated_uuid:
-                    invalidated_edge_uuids.append(invalidated_uuid)
-                    logger.info(
-                        f'Edge UUID {invalidated_uuid} (Fact: "{candidate_to_invalidate.fact}") marked for invalidation due to contradiction by new edge fact "{extracted_edge.fact}".'
-                    )
+                edges_to_invalidate.append(candidate_to_invalidate)
+                logger.info(
+                    f'Edge object {candidate_to_invalidate.uuid} (Fact: "{candidate_to_invalidate.fact}") marked for potential invalidation due to contradiction by new edge fact "{extracted_edge.fact}".'
+                )
             else:
                 logger.warning(f'LLM returned out-of-bounds contradicted_fact index: {idx}')
 
     end = time()
     logger.debug(
-        f'Resolved edge: {extracted_edge.fact} -> {edge.fact} ({edge.name}) in {(end - start) * 1000} ms. Invalidated: {invalidated_edge_uuids}'
+        f'Resolved edge: {extracted_edge.fact} -> {edge.fact} ({edge.name}) in {(end - start) * 1000} ms. Edges to invalidate: {[e.uuid for e in edges_to_invalidate]}'
     )
-    return edge, invalidated_edge_uuids
+    return edge, edges_to_invalidate
 
 
 async def dedupe_extracted_edge(

@@ -94,9 +94,15 @@ TASK: Extract entity nodes from CURRENT_MESSAGE. For each entity, provide its na
 
 KEY_POINTS:
 - Always extract the speaker (before the colon ':') as the first entity.
-- Extract significant entities, concepts, or actors mentioned in CURRENT_MESSAGE.
+- Extract significant real-world entities, concepts, or actors mentioned in CURRENT_MESSAGE.
 - Exclude entities only mentioned in PREVIOUS_EPISODE_SUMMARIES.
 - Do NOT extract relationships, actions, dates, or times as entities.
+- Do NOT extract common descriptive words or attribute values as standalone entities if they are clearly qualifying another entity. Examples of what NOT to extract as separate entities include:
+    - Statuses (e.g., "Active", "Completed", "InProgress", "Backlog", "New", "UnderConsideration").
+    - Generic types when used descriptively (e.g., "Project" if it describes a collection's type, "IdeaPool" if it describes a collection's purpose).
+    - Priority levels (e.g., "High", "Medium", "Low").
+    - Simple adjectives or states unless they represent a core, distinct concept.
+  These descriptive details will be handled as attributes of the primary entities later. Focus on the main Nouns or Noun Phrases that represent distinct items or groups.
 - Provide full, unambiguous names for entities.
 
 {context.get('custom_prompt', '')} 

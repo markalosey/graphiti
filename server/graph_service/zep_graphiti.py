@@ -2,6 +2,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)  # Force debug level for this logger
+logger.info('HOT RELOAD TEST - zep_graphiti.py file has been re-evaluated!')  # Test line
 
 from typing import Annotated
 
@@ -27,7 +28,14 @@ from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
 from graphiti_core.nodes import EntityNode, EpisodicNode  # type: ignore
 
 # Import the new IdeaNodeSchema
-from graphiti_core.models.nodes.custom_entity_types import IdeaNodeSchema
+from graphiti_core.models.nodes.custom_entity_types import (
+    IdeaNodeSchema,
+    TaskNodeSchema,
+    CollectionNodeSchema,
+    Requirement,
+    Preference,
+    Procedure,
+)
 
 from pydantic import BaseModel, Field  # For defining ENTITY_TYPES here for now
 
@@ -36,22 +44,23 @@ from graph_service.dto import FactResult
 
 
 # --- Define Custom Entity Types (Copied/adapted from old MCP server) ---
-class Requirement(BaseModel):
-    project_name: str = Field(
-        ..., description='The name of the project to which the requirement belongs.'
-    )
-    description: str = Field(..., description='Description of the requirement.')
+# MOVED TO custom_entity_types.py
+# class Requirement(BaseModel):
+#     project_name: str = Field(
+#         ..., description='The name of the project to which the requirement belongs.'
+#     )
+#     description: str = Field(..., description='Description of the requirement.')
 
 
-class Preference(BaseModel):
-    category: str = Field(
-        ..., description="The category of the preference. (e.g., 'Brands', 'Food', 'Music')"
-    )
-    description: str = Field(..., description='Brief description of the preference.')
+# class Preference(BaseModel):
+#     category: str = Field(
+#         ..., description="The category of the preference. (e.g., 'Brands', 'Food', 'Music')"
+#     )
+#     description: str = Field(..., description='Brief description of the preference.')
 
 
-class Procedure(BaseModel):
-    description: str = Field(..., description='Brief description of the procedure.')
+# class Procedure(BaseModel):
+#     description: str = Field(..., description='Brief description of the procedure.')
 
 
 ENTITY_TYPES: dict[str, type[BaseModel]] = {  # Use type[BaseModel] for better type hinting
@@ -59,6 +68,8 @@ ENTITY_TYPES: dict[str, type[BaseModel]] = {  # Use type[BaseModel] for better t
     'Preference': Preference,
     'Procedure': Procedure,
     'Idea': IdeaNodeSchema,  # Add the new Idea entity type
+    'Task': TaskNodeSchema,
+    'Collection': CollectionNodeSchema,
 }
 # --- End Custom Entity Types ---
 

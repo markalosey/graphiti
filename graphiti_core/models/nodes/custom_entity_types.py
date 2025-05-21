@@ -52,8 +52,102 @@ class IdeaNodeSchema(BaseModel):
         examples=['llm-as-judge', 'react', 'prompt-optimizer'],
     )
 
+    status: Optional[str] = Field(
+        None,
+        description='The current lifecycle status of the idea.',
+        examples=['New', 'UnderConsideration', 'Accepted', 'Archived', 'Implemented'],
+    )
+
     # Example of another potential idea-specific field:
     # priority: Optional[int] = Field(None, description="A priority level for the idea (e.g., 1-5).")
+
+
+class Requirement(BaseModel):
+    project_name: str = Field(
+        ..., description='The name of the project to which the requirement belongs.'
+    )
+    description: str = Field(..., description='Description of the requirement.')
+
+
+class Preference(BaseModel):
+    category: str = Field(
+        ..., description="The category of the preference. (e.g., 'Brands', 'Food', 'Music')"
+    )
+    description: str = Field(..., description='Brief description of the preference.')
+
+
+class Procedure(BaseModel):
+    description: str = Field(..., description='Brief description of the procedure.')
+
+
+class CollectionNodeSchema(BaseModel):
+    """
+    Represents a collection or container for work items like Ideas and Tasks.
+    The core title/name of the collection is expected to be stored in the base EntityNode's 'name' field.
+    Collections can be nested to create hierarchies (e.g., Project -> Feature -> Sprint).
+    Relationships (e.g., has_sub_collection, contains_idea, contains_task, member_of) are typically defined at the graph schema level.
+    """
+
+    description: Optional[str] = Field(
+        None,
+        description='A more detailed description of the collection and its purpose.',
+        examples=[
+            'A collection for all marketing efforts for the Q4 product launch.',
+            'Container for all tasks related to the new API development.',
+        ],
+    )
+
+    collection_type: Optional[str] = Field(
+        None,
+        description='The type of collection, e.g., Project, Feature, Epic, Sprint, IdeaPool, ActionPlan, Generic.',
+        examples=['Project', 'Feature', 'IdeaPool', 'ActionPlan', 'Generic'],
+    )
+
+    status: Optional[str] = Field(
+        None,
+        description='The current status of the collection.',
+        examples=['Active', 'Planning', 'OnHold', 'Completed', 'Archived'],
+    )
+
+    # Dates would typically be managed by base node properties or inferred from contents
+    # start_date: Optional[str] = Field(None, description="The start date of the collection, if applicable.")
+    # end_date: Optional[str] = Field(None, description="The end date or deadline for the collection, if applicable.")
+
+
+class TaskNodeSchema(BaseModel):
+    """
+    Represents an actionable work item, potentially derived from an Idea or created directly.
+    The core title of the task is expected to be stored in the base EntityNode's 'name' field.
+    Relationships (e.g., derived_from_idea, member_of_collection, depends_on_task) are typically defined at the graph schema level.
+    """
+
+    full_description: Optional[str] = Field(
+        None,
+        description='A detailed description of the task, its goals, and any specific requirements.',
+        examples=[
+            'Develop the user authentication module including password reset functionality.',
+            'Write documentation for the new billing API.',
+        ],
+    )
+
+    status: str = Field(
+        default='Backlog',
+        description='The current workflow status of the task.',
+        examples=['Backlog', 'InProgress', 'Blocked', 'InReview', 'Completed'],
+    )
+
+    priority: Optional[str] = Field(
+        None,
+        description='The priority level of the task.',
+        examples=['High', 'Medium', 'Low'],
+    )
+
+    # Assignee would likely be a relationship to a User/Person entity, not a simple string field here.
+    # assignee_id: Optional[str] = Field(None, description="Identifier for the user or agent assigned to this task.")
+
+    # Dates would typically be managed by base node properties or specific date fields if ISO format is not an issue
+    # due_date: Optional[str] = Field(None, description="The target completion date for the task.")
+    # completion_date: Optional[str] = Field(None, description="The actual completion date of the task.")
 
 
 # Example of how to define another custom entity type:

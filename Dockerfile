@@ -19,7 +19,7 @@ COPY ./server/pyproject.toml ./server/poetry.lock* /app/server/
 RUN poetry config virtualenvs.create false 
 
 # Install the local package
-RUN poetry build && pip install dist/*.whl
+# RUN poetry build && pip install dist/*.whl # Graphiti Core is mounted for dev, installed via server deps if needed for prod
 
 # Install server dependencies
 WORKDIR /app/server
