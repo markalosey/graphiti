@@ -97,16 +97,13 @@ Example for an 'Idea' with no extractable attributes of these types (based on th
     ]
 
 
-# Define the prompt version
-default_extract_attributes_prompt_v1 = PromptVersion(
-    name='default_extract_attributes_v1',
-    prompt_function=create_default_prompt_messages,
-    description='Default prompt for extracting custom entity attributes based on schema and context.',
-    version='1.0.0',
-)
+# The function itself conforms to the PromptVersion protocol (which is just a Callable)
+# and also to PromptFunction type alias.
+default_extract_attributes_prompt_v1: PromptFunction = create_default_prompt_messages
 
-# Create a Prompt object (dictionary-like) to hold versions
-versions: Dict[str, PromptVersion] = {
+# Create a dictionary to hold different versions of attribute extraction prompts.
+# The values must be functions that match the PromptFunction signature.
+versions: Dict[str, PromptFunction] = {
     'default': default_extract_attributes_prompt_v1,
     'v1': default_extract_attributes_prompt_v1,
 }
