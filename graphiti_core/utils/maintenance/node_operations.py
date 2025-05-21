@@ -17,13 +17,15 @@ limitations under the License.
 import logging
 from contextlib import suppress
 from time import time
-from typing import Any
+from typing import Any, List, Dict, Optional, Tuple
 from uuid import uuid4
+import re
 
 import pydantic
 from pydantic import BaseModel, Field
+from neo4j.exceptions import ClientError
 
-from graphiti_core.graphiti_types import GraphitiClients
+from graphiti_core.clients import GraphitiClients
 from graphiti_core.helpers import MAX_REFLEXION_ITERATIONS, semaphore_gather
 from graphiti_core.llm_client import LLMClient
 from graphiti_core.llm_client.config import ModelSize
@@ -40,6 +42,9 @@ from graphiti_core.search.search_config import SearchResults
 from graphiti_core.search.search_config_recipes import NODE_HYBRID_SEARCH_RRF
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.datetime_utils import utc_now
+from graphiti_core.utils.pattern_library import get_all_patterns
+from graphiti_core.utils.entity_extractor import RegexEntityExtractor, EntityMatch
+from graphiti_core.llm_client.response_models import EpisodeSummary
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +87,75 @@ async def extract_nodes(
     entities_missed = True
     reflexion_iterations = 0
 
+    # Initialize the RegexEntityExtractor with patterns
+    regex_extractor = RegexEntityExtractor(get_all_patterns())
+
+    # Try regex-based extraction first
+    regex_extracted_entities: List[EntityMatch] = []
+    try:
+        # Only attempt regex extraction if we have content to process
+        if episode.content:
+            logger.info('NODE_EXTRACTION: Attempting regex-based entity extraction')
+            regex_extracted_entities = await regex_extractor.extract_entities(episode.content)
+
+            # Filter out overlapping matches
+            regex_extracted_entities = regex_extractor.filter_overlapping_matches(
+                regex_extracted_entities
+            )
+
+            logger.info(
+                f'NODE_EXTRACTION: Regex extraction found {len(regex_extracted_entities)} entities'
+            )
+
+            # If we found entities with regex, we can convert and return directly
+            if regex_extracted_entities:
+                # Convert regex matches to EntityNode objects
+                extracted_nodes_list = []
+                for match in regex_extracted_entities:
+                    # Only include matches with confidence above threshold
+                    if match.confidence >= 0.85:
+                        # Map entity_type from regex patterns to Graphiti entity types
+                        entity_type_name = map_regex_entity_type_to_graphiti(
+                            match.entity_type, entity_types.keys() if entity_types else []
+                        )
+
+                        labels: list[str] = list({'Entity', str(entity_type_name)})
+
+                        new_node = EntityNode(
+                            name=match.name,
+                            group_id=episode.group_id,
+                            labels=labels,
+                            summary='',
+                            created_at=utc_now(),
+                        )
+                        extracted_nodes_list.append(new_node)
+                        logger.debug(
+                            f'Created new node from regex: {new_node.name} (UUID: {new_node.uuid})'
+                        )
+
+                # If we found sufficient entities, return them without LLM extraction
+                if len(extracted_nodes_list) > 0:
+                    logger.info(
+                        f'NODE_EXTRACTION: Successfully extracted {len(extracted_nodes_list)} nodes using regex patterns'
+                    )
+                    end = time()
+                    logger.debug(f'Extracted new nodes using regex in {(end - start) * 1000} ms')
+                    return extracted_nodes_list
+                else:
+                    logger.info(
+                        'NODE_EXTRACTION: Regex extraction found no high-confidence matches, falling back to LLM'
+                    )
+            else:
+                logger.info(
+                    'NODE_EXTRACTION: No entities found with regex extraction, falling back to LLM'
+                )
+    except Exception as e:
+        logger.error(f'NODE_EXTRACTION: Error during regex extraction: {e}', exc_info=True)
+        # Continue with LLM extraction as fallback
+
+    # If regex extraction didn't return sufficient results, proceed with LLM extraction
+    logger.info('NODE_EXTRACTION: Proceeding with LLM-based entity extraction')
+
     entity_types_context = [
         {
             'entity_type_id': 0,
@@ -112,6 +186,13 @@ async def extract_nodes(
         'entity_types': entity_types_context,
         'source_description': episode.source_description,
     }
+
+    # Add any regex findings as hints to the LLM
+    if regex_extracted_entities:
+        regex_hints = [f'{match.name} ({match.entity_type})' for match in regex_extracted_entities]
+        current_context['custom_prompt'] = (
+            'Consider these potential entities from preliminary analysis: ' + ', '.join(regex_hints)
+        )
 
     while entities_missed and reflexion_iterations <= MAX_REFLEXION_ITERATIONS:
         logger.info(f'NODE_EXTRACTION: Iteration {reflexion_iterations + 1}')
@@ -579,3 +660,33 @@ async def dedupe_node_list(
             uuid_map[uuid] = uuid_value
 
     return unique_nodes, uuid_map
+
+
+def map_regex_entity_type_to_graphiti(
+    regex_entity_type: str, available_entity_types: list[str]
+) -> str:
+    """
+    Map entity type from regex patterns to available Graphiti entity types.
+
+    Args:
+        regex_entity_type: Entity type from regex pattern
+        available_entity_types: List of available entity types in Graphiti
+
+    Returns:
+        Mapped entity type or 'Entity' as default
+    """
+    # Handle special EntityType and EntityName patterns from the pattern library
+    if regex_entity_type == 'EntityType':
+        return 'Entity'
+
+    # Direct matches (case-sensitive)
+    if regex_entity_type in available_entity_types:
+        return regex_entity_type
+
+    # Case-insensitive matches
+    for available_type in available_entity_types:
+        if regex_entity_type.lower() == available_type.lower():
+            return available_type
+
+    # Default to generic Entity
+    return 'Entity'

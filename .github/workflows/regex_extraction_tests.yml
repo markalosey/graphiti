@@ -1,0 +1,65 @@
+name: Regex Entity Extraction Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'graphiti_core/utils/entity_extractor.py'
+      - 'graphiti_core/utils/pattern_library.py'
+      - 'tests/utils/test_regex_extraction.py'
+      - 'tests/fixtures/entity_extraction/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'graphiti_core/utils/entity_extractor.py'
+      - 'graphiti_core/utils/pattern_library.py'
+      - 'tests/utils/test_regex_extraction.py'
+      - 'tests/fixtures/entity_extraction/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      
+      - name: Load cached Poetry installation
+        uses: actions/cache@v4
+        with:
+          path: ~/.local
+          key: poetry-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.1.2
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+      
+      - name: Run regex extraction tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          poetry run pytest tests/utils/test_regex_extraction.py -v
+      
+      - name: Generate test report
+        if: success() || failure()
+        run: |
+          echo "# Regex Entity Extraction Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Test run on: \`$(date)\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          
+          if [ ${{ job.status }} == "success" ]; then
+            echo "✅ **Tests passed successfully!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Tests failed. See details in the logs.**" >> $GITHUB_STEP_SUMMARY
+          fi 
