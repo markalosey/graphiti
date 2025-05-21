@@ -36,6 +36,7 @@ from graphiti_core.models.edges.edge_db_queries import (
 from graphiti_core.nodes import Node
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 ENTITY_EDGE_RETURN: LiteralString = """
         RETURN
@@ -216,14 +217,26 @@ class EntityEdge(Edge):
     )
 
     async def generate_embedding(self, embedder: EmbedderClient):
+        logger.critical(f'ENTITY_EDGE: Attempting to generate fact_embedding for: {self.fact}')
         start = time()
-
         text = self.fact.replace('\n', ' ')
-        self.fact_embedding = await embedder.create(input_data=[text])
-
+        try:
+            embedding_result = await embedder.create(input_data=[text])
+            logger.critical(f"ENTITY_EDGE: Embedding result for '{text}': {embedding_result}")
+            if embedding_result:
+                self.fact_embedding = embedding_result
+                logger.critical(f'ENTITY_EDGE: Successfully set fact_embedding for: {self.fact}')
+            else:
+                logger.critical(f'ENTITY_EDGE: Embedding result was None or empty for: {self.fact}')
+        except Exception as e:
+            logger.critical(
+                f"ENTITY_EDGE: Error during embedder.create for '{text}': {str(e)}", exc_info=True
+            )
+            self.fact_embedding = None  # Ensure it's None if error
         end = time()
-        logger.debug(f'embedded {text} in {end - start} ms')
-
+        logger.critical(
+            f'ENTITY_EDGE: Time for embedding "{text}": {end - start} ms, Final fact_embedding: {self.fact_embedding is not None}'
+        )
         return self.fact_embedding
 
     async def load_fact_embedding(self, driver: AsyncDriver):
@@ -498,7 +511,7 @@ def get_entity_edge_from_record(record: Any) -> EntityEdge:
     return edge
 
 
-def get_community_edge_from_record(record: Any):
+def get_community_edge_from_record(record: Any) -> CommunityEdge:
     return CommunityEdge(
         uuid=record['uuid'],
         group_id=record['group_id'],
@@ -509,8 +522,26 @@ def get_community_edge_from_record(record: Any):
 
 
 async def create_entity_edge_embeddings(embedder: EmbedderClient, edges: list[EntityEdge]):
-    if len(edges) == 0:
+    """Generate fact embeddings for a list of entity edges in place."""
+    texts_to_embed = [edge.fact.replace('\n', ' ') for edge in edges if edge.fact_embedding is None]
+    if not texts_to_embed:
         return
-    fact_embeddings = await embedder.create_batch([edge.fact for edge in edges])
-    for edge, fact_embedding in zip(edges, fact_embeddings, strict=True):
-        edge.fact_embedding = fact_embedding
+
+    logger.critical(
+        f'BULK_EDGE_EMBED: Generating embeddings for {len(texts_to_embed)} edge facts via create_batch.'
+    )
+    list_of_embeddings = await embedder.create_batch(texts_to_embed)
+
+    embed_idx = 0
+    for edge in edges:
+        if edge.fact_embedding is None:
+            if embed_idx < len(list_of_embeddings):
+                edge.fact_embedding = list_of_embeddings[embed_idx]
+                logger.critical(
+                    f"BULK_EDGE_EMBED: Set fact_embedding for edge fact '{edge.fact[:50]}...'"
+                )
+                embed_idx += 1
+            else:
+                logger.error(
+                    f"BULK_EDGE_EMBED: Mismatch in embedding results for edge fact '{edge.fact[:50]}...'"
+                )

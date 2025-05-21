@@ -20,6 +20,7 @@ from graphiti_core.llm_client.openai_client import (
     OpenAIClient,
     LLMConfig as CoreLLMConfig,
 )  # Aliased to avoid Pydantic conflict if any
+from graphiti_core.llm_client.anthropic_client import AnthropicClient # Added import
 from graphiti_core.embedder.client import EmbedderClient
 from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
 
@@ -66,10 +67,8 @@ class ZepGraphiti(Graphiti):
         password: str,
         llm_client: LLMClient | None = None,
         embedder_client: EmbedderClient | None = None,
-    ):  # Added embedder_client
-        super().__init__(
-            uri, user, password, llm_client=llm_client, embedder=embedder_client
-        )  # Assumed 'embedder' kwarg
+    ):
+        super().__init__(uri, user, password, llm_client=llm_client, embedder=embedder_client)
 
     async def save_entity_node(self, name: str, uuid: str, group_id: str, summary: str = ''):
         new_node = EntityNode(
@@ -132,49 +131,58 @@ class ZepGraphiti(Graphiti):
 # This is the dependency injector that FastAPI routes will use
 async def get_graphiti(settings: ZepEnvDep):
     logger.critical('!!!!!!!!!!!! GET_GRAPHITI CALLED !!!!!!!!!!!!')
-    logger.critical(
-        f"CRITICAL_DEBUG: settings.model_name = '{settings.model_name}' (type: {type(settings.model_name)})"
-    )
-    logger.critical(
-        f"CRITICAL_DEBUG: settings.embedding_name = '{settings.embedding_name}' (type: {type(settings.embedding_name)})"
-    )
-    logger.critical(
-        f"CRITICAL_DEBUG: settings.openai_base_url = '{settings.openai_base_url}' (type: {type(settings.openai_base_url)})"
-    )
-    logger.critical(
-        f'CRITICAL_DEBUG: settings.openai_api_key IS SET: {bool(settings.openai_api_key)}'
-    )
+    # Log all relevant settings for debugging
+    logger.critical(f"CRITICAL_DEBUG: settings.anthropic_llm_model_name = '{settings.anthropic_llm_model_name}'")
+    logger.critical(f"CRITICAL_DEBUG: settings.anthropic_api_key IS SET = {bool(settings.anthropic_api_key)}")
+    logger.critical(f"CRITICAL_DEBUG: settings.openai_llm_model_name = '{settings.openai_llm_model_name}'")
+    logger.critical(f"CRITICAL_DEBUG: settings.embedding_name = '{settings.embedding_name}'")
+    logger.critical(f"CRITICAL_DEBUG: settings.openai_embedding_dimensions = '{settings.openai_embedding_dimensions}'")
+    logger.critical(f"CRITICAL_DEBUG: settings.openai_base_url = '{settings.openai_base_url}'")
+    logger.critical(f'CRITICAL_DEBUG: settings.openai_api_key IS SET: {bool(settings.openai_api_key)}')
 
     llm_client_instance: LLMClient | None = None
-    if settings.model_name and settings.openai_base_url:
+
+    if settings.anthropic_llm_model_name and settings.anthropic_api_key:
         llm_core_config = CoreLLMConfig(
-            api_key=settings.openai_api_key or 'dummy-key',
-            model=settings.model_name,
-            base_url=settings.openai_base_url,
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_llm_model_name,
+            # Anthropic client doesn't use base_url in the same way, typically direct.
+            # max_tokens can be set here if needed, or rely on AnthropicClient defaults/docker-compose vars if added
+        )
+        llm_client_instance = AnthropicClient(config=llm_core_config)
+        logger.critical(
+            f'CRITICAL_LLM_CONFIG: Anthropic LLM Client configured using model: {llm_core_config.model}'
+        )
+    elif settings.openai_llm_model_name: # Assuming openai_base_url might be optional if hitting OpenAI directly
+        llm_core_config = CoreLLMConfig(
+            api_key=settings.openai_api_key or 'dummy-key', # OpenAI API key is crucial here
+            model=settings.openai_llm_model_name,
+            base_url=settings.openai_base_url, # Could be None for direct OpenAI API
         )
         llm_client_instance = OpenAIClient(config=llm_core_config)
         logger.critical(
-            f'CRITICAL_LLM_CONFIG: LLM Client configured for model: {settings.model_name} at {settings.openai_base_url}'
+            f'CRITICAL_LLM_CONFIG: OpenAI LLM Client configured using model: {llm_core_config.model} at {llm_core_config.base_url or "OpenAI default"}'
         )
     else:
         logger.critical(
-            f'CRITICAL_LLM_CONFIG_FAIL: LLM Client NOT configured due to missing model_name or openai_base_url. Custom entity extraction might be affected.'
+            f'CRITICAL_LLM_CONFIG_FAIL: LLM Client NOT configured. Neither Anthropic nor OpenAI LLM settings were sufficient. Custom entity extraction might be affected.'
         )
 
     embedder_client_instance: EmbedderClient | None = None
-    if settings.embedding_name and settings.openai_base_url:
+    if settings.embedding_name: # openai_base_url is critical for local model
         embedder_core_config = OpenAIEmbedderConfig(
-            api_key=settings.openai_api_key or 'dummy-key',
-            model=settings.embedding_name,
-            base_url=settings.openai_base_url,
+            api_key=settings.openai_api_key or 'dummy-key', # Usually dummy for local endpoint
+            embedding_model=settings.embedding_name,
+            base_url=settings.openai_base_url, # Essential for local model
+            embedding_dim=settings.openai_embedding_dimensions # Corrected: embedding_dim, not dimensions
         )
         embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
         logger.critical(
-            f'CRITICAL_EMBEDDER_CONFIG: Embedder Client configured for model: {settings.embedding_name} at {settings.openai_base_url}'
+            f'CRITICAL_EMBEDDER_CONFIG: Embedder Client configured using model: {embedder_core_config.embedding_model} at {embedder_core_config.base_url} with dims: {embedder_core_config.embedding_dim}' # Corrected: embedding_dim
         )
     else:
         logger.critical(
-            f'CRITICAL_EMBEDDER_CONFIG_FAIL: Embedder Client NOT configured due to missing embedding_name or openai_base_url. Embeddings will not be generated.'
+            f'CRITICAL_EMBEDDER_CONFIG_FAIL: Embedder Client NOT configured due to missing embedding_name. Embeddings will not be generated.'
         )
 
     client = ZepGraphiti(
@@ -193,37 +201,48 @@ async def get_graphiti(settings: ZepEnvDep):
 async def initialize_graphiti(settings: Settings):
     logger.critical('!!!!!!!!!!!! INITIALIZE_GRAPHITI CALLED !!!!!!!!!!!!')
     llm_client_instance: LLMClient | None = None
-    if settings.model_name and settings.openai_base_url:
+
+    if settings.anthropic_llm_model_name and settings.anthropic_api_key:
+        llm_core_config = CoreLLMConfig(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_llm_model_name,
+        )
+        llm_client_instance = AnthropicClient(config=llm_core_config)
+        logger.critical(f"LLM Client for init: Anthropic ({llm_core_config.model})")
+    elif settings.openai_llm_model_name:
         llm_core_config = CoreLLMConfig(
             api_key=settings.openai_api_key or 'dummy-key',
-            model=settings.model_name,
+            model=settings.openai_llm_model_name,
             base_url=settings.openai_base_url,
         )
         llm_client_instance = OpenAIClient(config=llm_core_config)
+        logger.critical(f"LLM Client for init: OpenAI ({llm_core_config.model} at {llm_core_config.base_url or 'OpenAI default'})")
     else:
-        logger.info(
-            'LLM Client not configured for initial index build (model_name or openai_base_url missing).'
+        logger.critical(
+            'LLM Client not configured for initial index build (neither Anthropic nor OpenAI settings sufficient).'
         )
 
     embedder_client_instance: EmbedderClient | None = None
-    if settings.embedding_name and settings.openai_base_url:
+    if settings.embedding_name:
         embedder_core_config = OpenAIEmbedderConfig(
             api_key=settings.openai_api_key or 'dummy-key',
-            model=settings.embedding_name,
+            embedding_model=settings.embedding_name,
             base_url=settings.openai_base_url,
+            embedding_dim=settings.openai_embedding_dimensions # Corrected: embedding_dim, not dimensions
         )
         embedder_client_instance = OpenAIEmbedder(config=embedder_core_config)
+        logger.critical(f"Embedder Client for init: {embedder_core_config.embedding_model} at {embedder_core_config.base_url} dims: {embedder_core_config.embedding_dim}") # Corrected: embedding_dim
     else:
-        logger.info(
-            'Embedder Client not configured for initial index build (embedding_name or openai_base_url missing).'
+        logger.critical(
+            'Embedder Client not configured for initial index build (embedding_name missing).'
         )
 
     temp_client_for_init = ZepGraphiti(
         uri=settings.neo4j_uri,
         user=settings.neo4j_user,
         password=settings.neo4j_password,
-        llm_client=llm_client_instance,  # Pass even if None, Graphiti should handle
-        embedder_client=embedder_client_instance,  # Pass even if None
+        llm_client=llm_client_instance,
+        embedder_client=embedder_client_instance,
     )
     try:
         logger.info('Building indices and constraints for Graphiti API service...')

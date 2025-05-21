@@ -66,44 +66,34 @@ def summarize_pair(context: dict[str, Any]) -> list[Message]:
 
 
 def summarize_context(context: dict[str, Any]) -> list[Message]:
+    sys_prompt = (
+        "You are an AI assistant that creates/updates an ENTITY's summary and extracts its attributes "
+        'based on contextual messages and existing entity information.'
+    )
+
+    user_prompt_content = f"""
+<CONTEXT_MESSAGES_AND_SUMMARIES>
+Previous Episode Summaries: {json.dumps(context.get('previous_episode_summaries', []), indent=2)}
+Current Episode Content: {json.dumps(context['episode_content'], indent=2)}
+</CONTEXT_MESSAGES_AND_SUMMARIES>
+
+<ENTITY_TO_UPDATE>
+Name: {context['node_name']}
+Existing Summary (for context): {context['node_summary']}
+Existing Attributes (for context): {json.dumps(context.get('attributes', {}), indent=2)} 
+</ENTITY_TO_UPDATE>
+
+TASK: Based on CONTEXT_MESSAGES_AND_SUMMARIES and the ENTITY_TO_UPDATE's existing information:
+1. Create an updated, concise summary for the ENTITY (max 250 words), incorporating new relevant information.
+2. Extract values for any explicitly defined attributes (schema for attributes is implicitly part of the expected response_model).
+
+KEY_POINTS:
+- Focus on information directly relevant to the ENTITY_TO_UPDATE from the provided messages/summaries.
+- Do not hallucinate values; if information for an attribute isn't present, it should not be included or should be null based on schema.
+"""
     return [
-        Message(
-            role='system',
-            content='You are a helpful assistant that extracts entity properties from the provided text.',
-        ),
-        Message(
-            role='user',
-            content=f"""
-            
-        <MESSAGES>
-        {json.dumps(context['previous_episodes'], indent=2)}
-        {json.dumps(context['episode_content'], indent=2)}
-        </MESSAGES>
-        
-        Given the above MESSAGES and the following ENTITY name, create a summary for the ENTITY. Your summary must only use
-        information from the provided MESSAGES. Your summary should also only contain information relevant to the
-        provided ENTITY. Summaries must be under 250 words.
-        
-        In addition, extract any values for the provided entity properties based on their descriptions.
-        If the value of the entity property cannot be found in the current context, set the value of the property to the Python value None.
-        
-        Guidelines:
-        1. Do not hallucinate entity property values if they cannot be found in the current context.
-        2. Only use the provided messages, entity, and entity context to set attribute values.
-        
-        <ENTITY>
-        {context['node_name']}
-        </ENTITY>
-        
-        <ENTITY CONTEXT>
-        {context['node_summary']}
-        </ENTITY CONTEXT>
-        
-        <ATTRIBUTES>
-        {json.dumps(context['attributes'], indent=2)}
-        </ATTRIBUTES>
-        """,
-        ),
+        Message(role='system', content=sys_prompt),
+        Message(role='user', content=user_prompt_content),
     ]
 
 

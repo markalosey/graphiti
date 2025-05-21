@@ -399,14 +399,31 @@ def compress_uuid_map(uuid_map: dict[str, str]) -> dict[str, str]:
 E = typing.TypeVar('E', bound=Edge)
 
 
-def resolve_edge_pointers(edges: list[E], uuid_map: dict[str, str]):
+def resolve_edge_pointers(edges: list[E], uuid_map: dict[str, str]) -> list[E]:
+    resolved_edges: list[E] = []
     for edge in edges:
-        source_uuid = edge.source_node_uuid
-        target_uuid = edge.target_node_uuid
-        edge.source_node_uuid = uuid_map.get(source_uuid, source_uuid)
-        edge.target_node_uuid = uuid_map.get(target_uuid, target_uuid)
+        original_source_uuid = edge.source_node_uuid
+        original_target_uuid = edge.target_node_uuid
 
-    return edges
+        # Get the new UUID from the map. If it's not in the map, the node was discarded or not resolved.
+        # In such a case, the edge referring to it is invalid.
+        final_source_uuid = uuid_map.get(original_source_uuid)
+        final_target_uuid = uuid_map.get(original_target_uuid)
+
+        if final_source_uuid and final_target_uuid:
+            edge.source_node_uuid = final_source_uuid
+            edge.target_node_uuid = final_target_uuid
+            resolved_edges.append(edge)
+        else:
+            if not final_source_uuid:
+                logger.warning(
+                    f"resolve_edge_pointers: Skipping edge (UUID: {edge.uuid}, Name: {edge.name}) because original source UUID '{original_source_uuid}' was not found in uuid_map. Edge fact: {getattr(edge, 'fact', 'N/A')}"
+                )
+            if not final_target_uuid:
+                logger.warning(
+                    f"resolve_edge_pointers: Skipping edge (UUID: {edge.uuid}, Name: {edge.name}) because original target UUID '{original_target_uuid}' was not found in uuid_map. Edge fact: {getattr(edge, 'fact', 'N/A')}"
+                )
+    return resolved_edges
 
 
 async def extract_edge_dates_bulk(

@@ -49,7 +49,7 @@ from graphiti_core.search.search_filters import (
 
 logger = logging.getLogger(__name__)
 
-RELEVANT_SCHEMA_LIMIT = 10
+RELEVANT_SCHEMA_LIMIT = 2
 DEFAULT_MIN_SCORE = 0.6
 DEFAULT_MMR_LAMBDA = 0.5
 MAX_SEARCH_DEPTH = 3

@@ -15,6 +15,10 @@ limitations under the License.
 """
 
 import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # Force debug level
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
@@ -139,15 +143,17 @@ class Node(BaseModel, ABC):
 
 
 class EpisodicNode(Node):
-    source: EpisodeType = Field(description='source type')
-    source_description: str = Field(description='description of the data source')
-    content: str = Field(description='raw episode data')
+    source: EpisodeType = Field(description='The source of the episode.')
+    source_description: str = Field(description='A description of the episode source.')
+    content: str = Field(description='The content of the episode.')
     valid_at: datetime = Field(
         description='datetime of when the original document was created',
     )
     entity_edges: list[str] = Field(
-        description='list of entity edges referenced in this episode',
-        default_factory=list,
+        default_factory=list, description='A list of entity edge uuids for this episode.'
+    )
+    summary_text: str | None = Field(
+        default=None, description='A concise summary of the episode content.'
     )
 
     async def save(self, driver: AsyncDriver):
@@ -296,12 +302,26 @@ class EntityNode(Node):
     )
 
     async def generate_name_embedding(self, embedder: EmbedderClient):
+        logger.critical(f'ENTITY_NODE: Attempting to generate name_embedding for: {self.name}')
         start = time()
         text = self.name.replace('\n', ' ')
-        self.name_embedding = await embedder.create(input_data=[text])
+        try:
+            embedding_result = await embedder.create(input_data=[text])
+            logger.critical(f"ENTITY_NODE: Embedding result for '{text}': {embedding_result}")
+            if embedding_result:
+                self.name_embedding = embedding_result
+                logger.critical(f'ENTITY_NODE: Successfully set name_embedding for: {self.name}')
+            else:
+                logger.critical(f'ENTITY_NODE: Embedding result was None or empty for: {self.name}')
+        except Exception as e:
+            logger.critical(
+                f"ENTITY_NODE: Error during embedder.create for '{text}': {str(e)}", exc_info=True
+            )
+            self.name_embedding = None  # Ensure it's None if error
         end = time()
-        logger.debug(f'embedded {text} in {end - start} ms')
-
+        logger.critical(
+            f'ENTITY_NODE: Time for embedding "{text}": {end - start} ms, Final name_embedding: {self.name_embedding is not None}'
+        )
         return self.name_embedding
 
     async def load_name_embedding(self, driver: AsyncDriver):
@@ -319,21 +339,26 @@ class EntityNode(Node):
         self.name_embedding = records[0]['name_embedding']
 
     async def save(self, driver: AsyncDriver):
-        entity_data: dict[str, Any] = {
+        # Prepare properties for the main SET clause, excluding name_embedding
+        entity_props: dict[str, Any] = {
             'uuid': self.uuid,
             'name': self.name,
-            'name_embedding': self.name_embedding,
+            # 'name_embedding': self.name_embedding, # Excluded from main props
             'group_id': self.group_id,
             'summary': self.summary,
             'created_at': self.created_at,
         }
+        entity_props.update(self.attributes or {})
 
-        entity_data.update(self.attributes or {})
+        # Ensure labels always include 'Entity'
+        final_labels = list(set(self.labels + ['Entity']))
 
         result = await driver.execute_query(
             ENTITY_NODE_SAVE,
-            labels=self.labels + ['Entity'],
-            entity_data=entity_data,
+            labels=final_labels,  # Pass the final list of labels
+            entity_props=entity_props,  # Properties for general SET
+            uuid_param=self.uuid,  # Explicit uuid for MERGE
+            name_embedding_param=self.name_embedding,  # Embedding passed separately
             database_=DEFAULT_DATABASE,
         )
 
@@ -433,12 +458,31 @@ class CommunityNode(Node):
         return result
 
     async def generate_name_embedding(self, embedder: EmbedderClient):
+        logger.critical(
+            f'COMMUNITY_NODE: Attempting to generate name_embedding for: {self.name}'
+        )  # Added for community
         start = time()
         text = self.name.replace('\n', ' ')
-        self.name_embedding = await embedder.create(input_data=[text])
+        try:
+            embedding_result = await embedder.create(input_data=[text])
+            logger.critical(f"COMMUNITY_NODE: Embedding result for '{text}': {embedding_result}")
+            if embedding_result:
+                self.name_embedding = embedding_result
+                logger.critical(f'COMMUNITY_NODE: Successfully set name_embedding for: {self.name}')
+            else:
+                logger.critical(
+                    f'COMMUNITY_NODE: Embedding result was None or empty for: {self.name}'
+                )
+        except Exception as e:
+            logger.critical(
+                f"COMMUNITY_NODE: Error during embedder.create for '{text}': {str(e)}",
+                exc_info=True,
+            )
+            self.name_embedding = None
         end = time()
-        logger.debug(f'embedded {text} in {end - start} ms')
-
+        logger.critical(
+            f'COMMUNITY_NODE: Time for embedding "{text}": {end - start} ms, Final name_embedding: {self.name_embedding is not None}'
+        )
         return self.name_embedding
 
     async def load_name_embedding(self, driver: AsyncDriver):
@@ -517,7 +561,7 @@ class CommunityNode(Node):
         """
             + cursor_query
             + """
-        RETURN
+            RETURN
             n.uuid As uuid, 
             n.name AS name,
             n.group_id AS group_id,
@@ -541,51 +585,84 @@ class CommunityNode(Node):
 # Node helpers
 def get_episodic_node_from_record(record: Any) -> EpisodicNode:
     return EpisodicNode(
-        content=record['content'],
-        created_at=record['created_at'].to_native().timestamp(),
-        valid_at=(record['valid_at'].to_native()),
         uuid=record['uuid'],
-        group_id=record['group_id'],
-        source=EpisodeType.from_str(record['source']),
         name=record['name'],
+        group_id=record['group_id'],
         source_description=record['source_description'],
+        content=record['content'],
+        source=record['source'],
         entity_edges=record['entity_edges'],
+        created_at=record['created_at'].to_native()
+        if hasattr(record['created_at'], 'to_native')
+        else record['created_at'],
+        valid_at=record['valid_at'].to_native()
+        if hasattr(record['valid_at'], 'to_native')
+        else record['valid_at'],
+        summary_text=record.get('summary_text'),
     )
 
 
 def get_entity_node_from_record(record: Any) -> EntityNode:
-    entity_node = EntityNode(
+    created_at_val = record['created_at']
+    created_at_native = (
+        created_at_val.to_native() if hasattr(created_at_val, 'to_native') else created_at_val
+    )
+
+    name_embedding_val = record.get('name_embedding')
+    if name_embedding_val is None and record.get('attributes'):
+        name_embedding_val = record['attributes'].get('name_embedding')
+
+    return EntityNode(
         uuid=record['uuid'],
         name=record['name'],
         group_id=record['group_id'],
-        labels=record['labels'],
-        created_at=record['created_at'].to_native(),
         summary=record['summary'],
+        labels=record['labels'],
         attributes=record['attributes'],
+        created_at=created_at_native,
+        name_embedding=name_embedding_val,
     )
-
-    entity_node.attributes.pop('uuid', None)
-    entity_node.attributes.pop('name', None)
-    entity_node.attributes.pop('group_id', None)
-    entity_node.attributes.pop('name_embedding', None)
-    entity_node.attributes.pop('summary', None)
-    entity_node.attributes.pop('created_at', None)
-
-    return entity_node
 
 
 def get_community_node_from_record(record: Any) -> CommunityNode:
+    created_at_val = record['created_at']
+    created_at_native = (
+        created_at_val.to_native() if hasattr(created_at_val, 'to_native') else created_at_val
+    )
+
+    name_embedding_val = record.get('name_embedding')
+    if name_embedding_val is None and record.get('attributes'):
+        name_embedding_val = record['attributes'].get('name_embedding')
+
     return CommunityNode(
         uuid=record['uuid'],
         name=record['name'],
         group_id=record['group_id'],
-        name_embedding=record['name_embedding'],
-        created_at=record['created_at'].to_native(),
         summary=record['summary'],
+        created_at=created_at_native,
+        name_embedding=name_embedding_val,
     )
 
 
 async def create_entity_node_embeddings(embedder: EmbedderClient, nodes: list[EntityNode]):
-    name_embeddings = await embedder.create_batch([node.name for node in nodes])
-    for node, name_embedding in zip(nodes, name_embeddings, strict=True):
-        node.name_embedding = name_embedding
+    """Generate name embeddings for a list of entity nodes in place."""
+    texts_to_embed = [node.name.replace('\n', ' ') for node in nodes if node.name_embedding is None]
+    if not texts_to_embed:
+        return
+
+    logger.critical(
+        f'BULK_NODE_EMBED: Generating embeddings for {len(texts_to_embed)} node names via create_batch.'
+    )
+    list_of_embeddings = await embedder.create_batch(texts_to_embed)
+
+    embed_idx = 0
+    for node in nodes:
+        if node.name_embedding is None:
+            if embed_idx < len(list_of_embeddings):
+                node.name_embedding = list_of_embeddings[embed_idx]
+                logger.critical(f"BULK_NODE_EMBED: Set name_embedding for node '{node.name}'")
+                embed_idx += 1
+            else:
+                logger.error(
+                    f"BULK_NODE_EMBED: Mismatch in embedding results for node '{node.name}'"
+                )

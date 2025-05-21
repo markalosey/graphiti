@@ -43,6 +43,9 @@ from graphiti_core.utils.datetime_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
+MAX_DUPLICATION_CANDIDATES_PER_NODE = 3  # Reduced from 5
+SUMMARY_TRUNCATION_LENGTH = 75  # Reduced from 150
+
 
 async def extract_nodes_reflexion(
     llm_client: LLMClient,
@@ -53,12 +56,14 @@ async def extract_nodes_reflexion(
     # Prepare context for LLM
     context = {
         'episode_content': episode.content,
-        'previous_episodes': [ep.content for ep in previous_episodes],
+        'previous_episode_summaries': [
+            ep.summary_text for ep in previous_episodes if ep.summary_text
+        ],
         'extracted_entities': node_names,
     }
 
     llm_response = await llm_client.generate_response(
-        prompt_library.extract_nodes.reflexion(context), MissedEntities
+        prompt_library.extract_nodes['reflexion'](context), MissedEntities
     )
     missed_entities = llm_response.get('missed_entities', [])
 
@@ -74,7 +79,6 @@ async def extract_nodes(
     start = time()
     llm_client = clients.llm_client
     llm_response = {}
-    custom_prompt = ''
     entities_missed = True
     reflexion_iterations = 0
 
@@ -85,7 +89,6 @@ async def extract_nodes(
             'entity_type_description': 'Default entity classification. Use this entity type if the entity is not one of the other listed types.',
         }
     ]
-
     entity_types_context += (
         [
             {
@@ -99,59 +102,105 @@ async def extract_nodes(
         else []
     )
 
-    context = {
+    # Initial context for the first pass of extraction
+    # Make a mutable copy for the loop if custom_prompt needs to be updated
+    current_context = {
         'episode_content': episode.content,
         'episode_timestamp': episode.valid_at.isoformat(),
-        'previous_episodes': [ep.content for ep in previous_episodes],
-        'custom_prompt': custom_prompt,
+        'previous_episode_summaries': [],
+        'custom_prompt': '',
         'entity_types': entity_types_context,
         'source_description': episode.source_description,
     }
 
     while entities_missed and reflexion_iterations <= MAX_REFLEXION_ITERATIONS:
+        logger.info(f'NODE_EXTRACTION: Iteration {reflexion_iterations + 1}')
+        logger.debug(
+            f'NODE_EXTRACTION: Context for LLM call: {current_context}'
+        )  # Log the context being sent
+
         if episode.source == EpisodeType.message:
             llm_response = await llm_client.generate_response(
-                prompt_library.extract_nodes.extract_message(context),
+                prompt_library.extract_nodes['extract_message'](current_context),
                 response_model=ExtractedEntities,
             )
         elif episode.source == EpisodeType.text:
             llm_response = await llm_client.generate_response(
-                prompt_library.extract_nodes.extract_text(context), response_model=ExtractedEntities
+                prompt_library.extract_nodes['extract_text'](current_context),
+                response_model=ExtractedEntities,
             )
         elif episode.source == EpisodeType.json:
             llm_response = await llm_client.generate_response(
-                prompt_library.extract_nodes.extract_json(context), response_model=ExtractedEntities
+                prompt_library.extract_nodes['extract_json'](current_context),
+                response_model=ExtractedEntities,
+            )
+        else:
+            logger.error(f'Unknown episode source type: {episode.source} for node extraction.')
+            return []  # Or raise error
+
+        logger.debug(f'NODE_EXTRACTION: LLM Response for entities: {llm_response}')
+
+        extracted_entities_data = llm_response.get('extracted_entities', [])
+        extracted_entities: list[ExtractedEntity] = []
+        if isinstance(extracted_entities_data, list):
+            for entity_data_from_llm in extracted_entities_data:
+                if isinstance(entity_data_from_llm, dict):
+                    try:
+                        extracted_entities.append(ExtractedEntity(**entity_data_from_llm))
+                    except Exception as e:
+                        logger.error(
+                            f'Error instantiating ExtractedEntity from LLM data: {entity_data_from_llm}, Error: {e}'
+                        )
+                else:
+                    logger.warning(
+                        f'LLM returned non-dict item in extracted_entities: {entity_data_from_llm}'
+                    )
+        else:
+            logger.warning(
+                f'LLM response for extracted_entities was not a list: {extracted_entities_data}'
             )
 
-        extracted_entities: list[ExtractedEntity] = [
-            ExtractedEntity(**entity_types_context)
-            for entity_types_context in llm_response.get('extracted_entities', [])
-        ]
-
         reflexion_iterations += 1
-        if reflexion_iterations < MAX_REFLEXION_ITERATIONS:
+        if (
+            reflexion_iterations < MAX_REFLEXION_ITERATIONS
+        ):  # Only do reflexion if enabled and not last iteration
+            logger.info('NODE_EXTRACTION: Performing reflexion step.')
             missing_entities = await extract_nodes_reflexion(
                 llm_client,
                 episode,
                 previous_episodes,
                 [entity.name for entity in extracted_entities],
             )
+            logger.info(
+                f'NODE_EXTRACTION: Reflexion found {len(missing_entities)} missing entities: {missing_entities}'
+            )
 
             entities_missed = len(missing_entities) != 0
-
-            custom_prompt = 'Make sure that the following entities are extracted: '
-            for entity in missing_entities:
-                custom_prompt += f'\n{entity},'
+            if entities_missed:
+                current_context['custom_prompt'] = (
+                    'Make sure that the following entities are extracted: '
+                    + ', '.join(missing_entities)
+                )
+            else:
+                current_context['custom_prompt'] = ''  # Clear custom prompt if no missed entities
+        else:
+            entities_missed = False  # Stop loop if max iterations reached or reflexion disabled
 
     filtered_extracted_entities = [entity for entity in extracted_entities if entity.name.strip()]
     end = time()
     logger.debug(f'Extracted new nodes: {filtered_extracted_entities} in {(end - start) * 1000} ms')
-    # Convert the extracted data into EntityNode objects
-    extracted_nodes = []
+    extracted_nodes_list = []
     for extracted_entity in filtered_extracted_entities:
-        entity_type_name = entity_types_context[extracted_entity.entity_type_id].get(
-            'entity_type_name'
-        )
+        entity_type_id_from_llm = extracted_entity.entity_type_id
+        entity_type_name = 'Entity'
+        if 0 <= entity_type_id_from_llm < len(entity_types_context):
+            entity_type_name = entity_types_context[entity_type_id_from_llm].get(
+                'entity_type_name', 'Entity'
+            )
+        else:
+            logger.warning(
+                f"Invalid entity_type_id {entity_type_id_from_llm} from LLM. Defaulting to 'Entity'."
+            )
 
         labels: list[str] = list({'Entity', str(entity_type_name)})
 
@@ -162,11 +211,11 @@ async def extract_nodes(
             summary='',
             created_at=utc_now(),
         )
-        extracted_nodes.append(new_node)
+        extracted_nodes_list.append(new_node)
         logger.debug(f'Created new node: {new_node.name} (UUID: {new_node.uuid})')
 
-    logger.debug(f'Extracted nodes: {[(n.name, n.uuid) for n in extracted_nodes]}')
-    return extracted_nodes
+    logger.debug(f'Extracted nodes: {[(n.name, n.uuid) for n in extracted_nodes_list]}')
+    return extracted_nodes_list
 
 
 async def dedupe_extracted_nodes(
@@ -195,7 +244,7 @@ async def dedupe_extracted_nodes(
         'extracted_nodes': extracted_nodes_context,
     }
 
-    llm_response = await llm_client.generate_response(prompt_library.dedupe_nodes.node(context))
+    llm_response = await llm_client.generate_response(prompt_library.dedupe_nodes['node'](context))
 
     duplicate_data = llm_response.get('duplicates', [])
 
@@ -245,9 +294,27 @@ async def resolve_extracted_nodes(
 
     entity_types_dict: dict[str, BaseModel] = entity_types if entity_types is not None else {}
 
-    # Prepare context for LLM
-    extracted_nodes_context = [
-        {
+    extracted_nodes_context = []
+    for i, node in enumerate(extracted_nodes):
+        candidates_for_node = existing_nodes_lists[i][:MAX_DUPLICATION_CANDIDATES_PER_NODE]
+        duplication_candidates_payload = []
+        for j, candidate in enumerate(candidates_for_node):
+            truncated_summary = (
+                (candidate.summary[:SUMMARY_TRUNCATION_LENGTH] + '...')
+                if candidate.summary and len(candidate.summary) > SUMMARY_TRUNCATION_LENGTH
+                else candidate.summary
+            )
+            # Explicitly construct the candidate dictionary to ensure only desired fields are included
+            candidate_data = {
+                'idx': j,
+                'name': candidate.name,
+                'entity_types': candidate.labels,
+                'summary': truncated_summary,
+                # 'attributes': {k: v for k, v in candidate.attributes.items() if k not in ['name_embedding', 'uuid']} # Omit all attributes for now
+            }
+            duplication_candidates_payload.append(candidate_data)
+
+        node_context_item = {
             'id': i,
             'name': node.name,
             'entity_type': node.labels,
@@ -255,31 +322,18 @@ async def resolve_extracted_nodes(
                 next((item for item in node.labels if item != 'Entity'), '')
             ).__doc__
             or 'Default Entity Type',
-            'duplication_candidates': [
-                {
-                    **{
-                        'idx': j,
-                        'name': candidate.name,
-                        'entity_types': candidate.labels,
-                    },
-                    **candidate.attributes,
-                }
-                for j, candidate in enumerate(existing_nodes_lists[i])
-            ],
+            'duplication_candidates': duplication_candidates_payload,
         }
-        for i, node in enumerate(extracted_nodes)
-    ]
+        extracted_nodes_context.append(node_context_item)
 
     context = {
         'extracted_nodes': extracted_nodes_context,
         'episode_content': episode.content if episode is not None else '',
-        'previous_episodes': [ep.content for ep in previous_episodes]
-        if previous_episodes is not None
-        else [],
+        'previous_episode_summaries': [],
     }
 
     llm_response = await llm_client.generate_response(
-        prompt_library.dedupe_nodes.nodes(context),
+        prompt_library.dedupe_nodes['nodes'](context),
         response_model=NodeResolutions,
     )
 
@@ -291,6 +345,11 @@ async def resolve_extracted_nodes(
         resolution_id = resolution.get('id', -1)
         duplicate_idx = resolution.get('duplicate_idx', -1)
 
+        # Ensure resolution_id is within bounds of extracted_nodes
+        if not (0 <= resolution_id < len(extracted_nodes)):
+            logger.warning(f'Resolved node id {resolution_id} out of bounds.')
+            continue  # Skip this resolution if id is invalid
+
         extracted_node = extracted_nodes[resolution_id]
 
         resolved_node = (
@@ -299,10 +358,22 @@ async def resolve_extracted_nodes(
             else extracted_node
         )
 
-        resolved_node.name = resolution.get('name')
+        # Ensure resolved_node is not None before trying to access attributes
+        if resolved_node:
+            new_name = resolution.get('name')
+            if new_name:
+                resolved_node.name = new_name
+            else:
+                logger.warning(
+                    f'LLM did not return a name for resolved node based on id {resolution_id}, keeping original: {resolved_node.name}'
+                )
 
-        resolved_nodes.append(resolved_node)
-        uuid_map[extracted_node.uuid] = resolved_node.uuid
+            resolved_nodes.append(resolved_node)
+            uuid_map[extracted_node.uuid] = resolved_node.uuid
+        else:
+            logger.warning(
+                f'Could not determine resolved_node for id {resolution_id} and duplicate_idx {duplicate_idx}. Original extracted node: {extracted_node.name}'
+            )
 
     logger.debug(f'Resolved nodes: {[(n.name, n.uuid) for n in resolved_nodes]}')
 
@@ -346,13 +417,15 @@ async def resolve_extracted_node(
         if entity_type is not None
         else 'Default Entity Type',
         'episode_content': episode.content if episode is not None else '',
-        'previous_episodes': [ep.content for ep in previous_episodes]
-        if previous_episodes is not None
-        else [],
+        'previous_episode_summaries': [
+            ep.summary_text
+            for ep in previous_episodes
+            if ep.summary_text and previous_episodes is not None
+        ],
     }
 
     llm_response = await llm_client.generate_response(
-        prompt_library.dedupe_nodes.node(context),
+        prompt_library.dedupe_nodes['node'](context),
         response_model=NodeDuplicate,
         model_size=ModelSize.small,
     )
@@ -439,13 +512,15 @@ async def extract_attributes_from_node(
     summary_context: dict[str, Any] = {
         'node': node_context,
         'episode_content': episode.content if episode is not None else '',
-        'previous_episodes': [ep.content for ep in previous_episodes]
-        if previous_episodes is not None
-        else [],
+        'previous_episode_summaries': [
+            ep.summary_text
+            for ep in previous_episodes
+            if ep.summary_text and previous_episodes is not None
+        ],
     }
 
     llm_response = await llm_client.generate_response(
-        prompt_library.extract_nodes.extract_attributes(summary_context),
+        prompt_library.extract_nodes['extract_attributes'](summary_context),
         response_model=entity_attributes_model,
         model_size=ModelSize.small,
     )
@@ -480,7 +555,7 @@ async def dedupe_node_list(
     }
 
     llm_response = await llm_client.generate_response(
-        prompt_library.dedupe_nodes.node_list(context)
+        prompt_library.dedupe_nodes['node_list'](context)
     )
 
     nodes_data = llm_response.get('nodes', [])

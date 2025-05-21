@@ -1,9 +1,19 @@
 from .common import Message, Result
 from .ingest import AddEntityNodeRequest, AddMessagesRequest
-from .retrieve import FactResult, GetMemoryRequest, GetMemoryResponse, SearchQuery, SearchResults
+from .retrieve import (
+    FactResult,
+    GetMemoryRequest,
+    GetMemoryResponse,
+    FactSearchQuery,
+    NodeSearchQuery,
+    SearchResults,
+    NodeSearchResultItem,
+    SearchNodesResponse,
+)
 
 __all__ = [
-    'SearchQuery',
+    'FactSearchQuery',
+    'NodeSearchQuery',
     'Message',
     'AddMessagesRequest',
     'AddEntityNodeRequest',
@@ -12,4 +22,6 @@ __all__ = [
     'Result',
     'GetMemoryRequest',
     'GetMemoryResponse',
+    'NodeSearchResultItem',
+    'SearchNodesResponse',
 ]
