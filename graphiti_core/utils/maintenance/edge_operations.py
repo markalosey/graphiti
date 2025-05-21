@@ -17,6 +17,7 @@ limitations under the License.
 import logging
 from datetime import datetime
 from time import time
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -401,6 +402,7 @@ async def resolve_extracted_edge(
     episode: EpisodicNode,
     edge_types: dict[str, BaseModel] | None = None,
 ) -> tuple[EntityEdge, list[EntityEdge]]:
+    logger.info('HOT RELOAD CORE TEST - edge_operations.py V6 - In resolve_extracted_edge')
     if len(related_edges) == 0 and len(existing_edges) == 0:
         return extracted_edge, []
 
@@ -441,71 +443,58 @@ async def resolve_extracted_edge(
         model_size=ModelSize.small,
     )
 
-    duplicate_fact_id: int = llm_response.get('duplicate_fact_id', -1)
+    duplicate_fact_uuid: Optional[str] = llm_response.get('duplicate_fact_id')
+    contradicted_fact_indices: list[int] = llm_response.get('contradicted_facts', [])
+    resolved_fact_type: str = llm_response.get('fact_type', 'DEFAULT')
 
-    resolved_edge = (
-        related_edges[duplicate_fact_id]
-        if 0 <= duplicate_fact_id < len(related_edges)
-        else extracted_edge
-    )
+    edge: EntityEdge
+    if duplicate_fact_uuid:
+        found_duplicate = False
+        for existing_edge_dict in context.get('existing_edges', []):
+            if existing_edge_dict.get('id') == duplicate_fact_uuid:
+                matching_related_edge = next(
+                    (re for re in related_edges if re.uuid == duplicate_fact_uuid), None
+                )
+                if matching_related_edge:
+                    edge = matching_related_edge
+                    logger.info(
+                        f'New edge fact "{extracted_edge.fact}" is a duplicate of existing edge UUID: {duplicate_fact_uuid}, Name: {edge.name}'
+                    )
+                    found_duplicate = True
+                else:
+                    logger.warning(
+                        f'LLM identified duplicate UUID {duplicate_fact_uuid} but not found in provided related_edges objects. Treating as new.'
+                    )
+                    edge = extracted_edge
+                break
+        if not found_duplicate:
+            logger.warning(
+                f'LLM identified duplicate UUID {duplicate_fact_uuid} from prompt context, but it was not actionable with current related_edges objects. Treating new_edge as unique.'
+            )
+            edge = extracted_edge
+    else:
+        edge = extracted_edge
+        logger.info(f'New edge fact "{edge.fact}" is considered unique.')
 
-    if duplicate_fact_id >= 0 and episode is not None:
-        resolved_edge.episodes.append(episode.uuid)
+    edge.name = resolved_fact_type
 
-    contradicted_facts: list[int] = llm_response.get('contradicted_facts', [])
-
-    invalidation_candidates: list[EntityEdge] = [existing_edges[i] for i in contradicted_facts]
-
-    fact_type: str = str(llm_response.get('fact_type'))
-    if fact_type.upper() != 'DEFAULT' and edge_types is not None:
-        resolved_edge.name = fact_type
-
-        edge_attributes_context = {
-            'message': episode.content,
-            'reference_time': episode.valid_at,
-            'fact': resolved_edge.fact,
-        }
-
-        edge_model = edge_types.get(fact_type)
-
-        edge_attributes_response = await llm_client.generate_response(
-            prompt_library.extract_edges['extract_attributes'](edge_attributes_context),
-            response_model=edge_model,  # type: ignore
-            model_size=ModelSize.small,
-        )
-
-        resolved_edge.attributes = edge_attributes_response
+    edges_to_invalidate: list[EntityEdge] = []
+    if existing_edges and contradicted_fact_indices:
+        for idx in contradicted_fact_indices:
+            if 0 <= idx < len(existing_edges):
+                candidate_to_invalidate = existing_edges[idx]
+                edges_to_invalidate.append(candidate_to_invalidate)
+                logger.info(
+                    f'Edge object {candidate_to_invalidate.uuid} (Fact: "{candidate_to_invalidate.fact}") marked for potential invalidation due to contradiction by new edge fact "{extracted_edge.fact}".'
+                )
+            else:
+                logger.warning(f'LLM returned out-of-bounds contradicted_fact index: {idx}')
 
     end = time()
     logger.debug(
-        f'Resolved Edge: {extracted_edge.name} is {resolved_edge.name}, in {(end - start) * 1000} ms'
+        f'Resolved edge: {extracted_edge.fact} -> {edge.fact} ({edge.name}) in {(end - start) * 1000} ms. Edges to invalidate: {[e.uuid for e in edges_to_invalidate]}'
     )
-
-    now = utc_now()
-
-    if resolved_edge.invalid_at and not resolved_edge.expired_at:
-        resolved_edge.expired_at = now
-
-    # Determine if the new_edge needs to be expired
-    if resolved_edge.expired_at is None:
-        invalidation_candidates.sort(key=lambda c: (c.valid_at is None, c.valid_at))
-        for candidate in invalidation_candidates:
-            if (
-                candidate.valid_at
-                and resolved_edge.valid_at
-                and candidate.valid_at.tzinfo
-                and resolved_edge.valid_at.tzinfo
-                and candidate.valid_at > resolved_edge.valid_at
-            ):
-                # Expire new edge since we have information about more recent events
-                resolved_edge.invalid_at = candidate.valid_at
-                resolved_edge.expired_at = now
-                break
-
-    # Determine which contradictory edges need to be expired
-    invalidated_edges = resolve_edge_contradictions(resolved_edge, invalidation_candidates)
-
-    return resolved_edge, invalidated_edges
+    return edge, edges_to_invalidate
 
 
 async def dedupe_extracted_edge(
