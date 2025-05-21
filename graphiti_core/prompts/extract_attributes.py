@@ -5,7 +5,7 @@ based on its type and the provided episode context.
 
 from typing import Any, Dict, List
 
-from .models import Message, PromptFunction, PromptVersion, Prompt
+from .models import Message, PromptFunction, PromptVersion
 
 
 def create_default_prompt_messages(context: Dict[str, Any]) -> List[Message]:
@@ -106,7 +106,7 @@ default_extract_attributes_prompt_v1 = PromptVersion(
 )
 
 # Create a Prompt object (dictionary-like) to hold versions
-versions: Prompt = {
+versions: Dict[str, PromptVersion] = {
     'default': default_extract_attributes_prompt_v1,
     'v1': default_extract_attributes_prompt_v1,
 }
