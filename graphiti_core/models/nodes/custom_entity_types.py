@@ -26,21 +26,30 @@ from pydantic import BaseModel, Field
 class IdeaNodeSchema(BaseModel):
     """
     Represents a captured idea, concept, or undeveloped thought.
+    The core title of the idea is expected to be stored in the base EntityNode's 'name' field.
+    This schema defines additional, idea-specific attributes.
     Ideas are typically short pieces of text that can be tagged for future reference or development.
+    The category might come from a top-right notation on a card, and details from the main body.
     """
 
-    # Note: The actual 'content' of the idea is expected to be the 'name' field
-    # of the base EntityNode, as Graphiti's extraction focuses on 'name' for the core text.
-    # This model primarily defines additional, idea-specific attributes and provides a
-    # description for the LLM to understand what an 'Idea' entity is.
+    category: Optional[str] = Field(
+        None,
+        description="A general category for the idea (e.g., from top-right of an index card, like 'project nanoo').",
+        examples=['project-nanoo', 'marketing', 'product-feature'],
+    )
 
-    # If we wanted 'content' as a separate field specific to Idea, it would be defined here.
-    # For now, we assume the main text of the idea will populate EntityNode.name.
+    details: Optional[str] = Field(
+        None,
+        description='The detailed content, notes, or bullet points describing the idea, supplementary to its main title/name.',
+        examples=[
+            'This involves using a prebuilt React component and integrating an LLM for prompt optimization.'
+        ],
+    )
 
     tags: Optional[List[str]] = Field(
         default_factory=list,
-        description='A list of keywords or tags associated with the idea for categorization and searchability.',
-        examples=['new_feature', 'refactor', 'marketing_campaign'],
+        description='A list of keywords or tags associated with the idea for categorization and searchability (e.g., from hashtags or keywords in the text).',
+        examples=['llm-as-judge', 'react', 'prompt-optimizer'],
     )
 
     # Example of another potential idea-specific field:

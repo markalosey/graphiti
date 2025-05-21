@@ -4,6 +4,7 @@ from . import (
     extract_edge_dates,
     extract_edges,
     extract_nodes,
+    extract_attributes,
     invalidate_edges,
     summarize_nodes,
     summarize_episode,
@@ -20,6 +21,7 @@ class PromptLibrary:
         )
         self.extract_edges: extract_edges.Prompt = extract_edges.versions  # type: ignore
         self.extract_nodes: extract_nodes.Prompt = extract_nodes.versions  # type: ignore
+        self.extract_attributes: extract_attributes.Prompt = extract_attributes.versions
         self.invalidate_edges: invalidate_edges.Prompt = invalidate_edges.versions  # type: ignore
         self.summarize_nodes: summarize_nodes.Prompt = summarize_nodes.versions  # type: ignore
         self.summarize_episode: summarize_episode.PromptFunction = (
