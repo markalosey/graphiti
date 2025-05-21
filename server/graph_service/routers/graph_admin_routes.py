@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from graph_service.zep_graphiti import Graphiti, get_graphiti
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
+from graphiti_core.utils import get_formatting_guidelines, GuidelineError
 
 logger = logging.getLogger(__name__)
 
@@ -75,4 +76,37 @@ async def get_all_groups(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f'An error occurred while retrieving group IDs: {str(e)}',
+        )
+
+
+# Create a new router for system routes outside of the /graph prefix
+system_router = APIRouter(
+    prefix='/system',
+    tags=['System'],
+)
+
+
+@system_router.get(
+    '/formatting-guidelines',
+    status_code=status.HTTP_200_OK,
+    summary='Get formatting guidelines',
+    description='Retrieves the formatting guidelines for the Graphiti system along with an MD5 hash for validation.',
+    response_model=Dict[str, str],
+)
+async def get_system_formatting_guidelines() -> Dict[str, str]:
+    try:
+        logger.info('Retrieving formatting guidelines...')
+        content, md5_hash = get_formatting_guidelines()
+        return {'guidelines_content': content, 'guidelines_hash': md5_hash}
+    except GuidelineError as e:
+        logger.error(f'Error retrieving formatting guidelines: {e}')
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f'Error retrieving formatting guidelines: {str(e)}',
+        )
+    except Exception as e:
+        logger.error(f'Unexpected error retrieving formatting guidelines: {e}', exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f'An unexpected error occurred: {str(e)}',
         )

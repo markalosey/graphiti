@@ -23,6 +23,7 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(retrieve.router)
 app.include_router(ingest.router)
 app.include_router(graph_admin_routes.router)
+app.include_router(graph_admin_routes.system_router)
 
 
 @app.get('/healthcheck')
