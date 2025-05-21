@@ -336,23 +336,25 @@ async def node_fulltext_search(
     if fuzzy_query == '':
         return []
 
-    filter_query, filter_params = node_search_filter_query_constructor(search_filter)
+    label_str, filter_params = node_search_filter_query_constructor(search_filter)
 
-    query = (
+    cypher_query = (
         """
-                                                                                        CALL db.index.fulltext.queryNodes("node_name_and_summary", $query, {limit: $limit}) 
-                                                                                        YIELD node AS n, score
-                                                                                        WHERE n:Entity
-                                                                                        """
-        + filter_query
+        CALL db.index.fulltext.queryNodes("node_name_and_summary", $query, {limit: $limit}) 
+        YIELD node AS n, score
+        WHERE n:Entity
+        """
         + ENTITY_NODE_RETURN
         + """
         ORDER BY score DESC
         """
     )
+    # Insert label_str into the WHERE n:Entity line if present
+    if label_str:
+        cypher_query = cypher_query.replace('WHERE n:Entity', f'WHERE n:Entity{label_str}')
 
     records, _, _ = await driver.execute_query(
-        query,
+        cypher_query,
         filter_params,
         query=fuzzy_query,
         group_ids=group_ids,
@@ -381,16 +383,15 @@ async def node_similarity_search(
         group_filter_query += 'WHERE n.group_id IN $group_ids'
         query_params['group_ids'] = group_ids
 
-    filter_query, filter_params = node_search_filter_query_constructor(search_filter)
+    label_str, filter_params = node_search_filter_query_constructor(search_filter)
     query_params.update(filter_params)
 
-    records, _, _ = await driver.execute_query(
+    cypher_query = (
         RUNTIME_QUERY
-        + """
-            MATCH (n:Entity)
+        + f"""
+            MATCH (n:Entity{label_str})
             """
         + group_filter_query
-        + filter_query
         + """
             WITH n, vector.similarity.cosine(n.name_embedding, $search_vector) AS score
             WHERE score > $min_score"""
@@ -398,7 +399,18 @@ async def node_similarity_search(
         + """
         ORDER BY score DESC
         LIMIT $limit
-        """,
+        """
+    )
+    # If label_str is present, insert it after :Entity in MATCH
+    if label_str:
+        cypher_query = cypher_query.replace(
+            'MATCH (n:Entity{label_str})', f'MATCH (n:Entity{label_str})'
+        )
+    else:
+        cypher_query = cypher_query.replace('MATCH (n:Entity{label_str})', 'MATCH (n:Entity)')
+
+    records, _, _ = await driver.execute_query(
+        cypher_query,
         query_params,
         search_vector=search_vector,
         group_ids=group_ids,
@@ -423,19 +435,22 @@ async def node_bfs_search(
     if bfs_origin_node_uuids is None:
         return []
 
-    filter_query, filter_params = node_search_filter_query_constructor(search_filter)
+    label_str, filter_params = node_search_filter_query_constructor(search_filter)
 
-    records, _, _ = await driver.execute_query(
+    cypher_query = (
         """
             UNWIND $bfs_origin_node_uuids AS origin_uuid
-            MATCH (origin:Entity|Episodic {uuid: origin_uuid})-[:RELATES_TO|MENTIONS]->{1,3}(n:Entity)
-            WHERE n.group_id = origin.group_id
-            """
-        + filter_query
+            MATCH (origin:Entity|Episodic {uuid: origin_uuid})-[:RELATES_TO|MENTIONS]->{1,3}(n:Entity"""
+        + label_str
+        + ')\n            WHERE n.group_id = origin.group_id\n'
         + ENTITY_NODE_RETURN
         + """
         LIMIT $limit
-        """,
+        """
+    )
+
+    records, _, _ = await driver.execute_query(
+        cypher_query,
         filter_params,
         bfs_origin_node_uuids=bfs_origin_node_uuids,
         depth=bfs_max_depth,

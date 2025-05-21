@@ -50,16 +50,14 @@ class SearchFilters(BaseModel):
 
 def node_search_filter_query_constructor(
     filters: SearchFilters,
-) -> tuple[LiteralString, dict[str, Any]]:
-    filter_query: LiteralString = ''
+) -> tuple[str, dict[str, Any]]:
+    label_str = ''
     filter_params: dict[str, Any] = {}
 
-    if filters.node_labels is not None:
-        node_labels = '|'.join(filters.node_labels)
-        node_label_filter = ' AND n:' + node_labels
-        filter_query += node_label_filter
+    if filters.node_labels is not None and len(filters.node_labels) > 0:
+        label_str = ':' + ':'.join(filters.node_labels)
 
-    return filter_query, filter_params
+    return label_str, filter_params
 
 
 def edge_search_filter_query_constructor(
