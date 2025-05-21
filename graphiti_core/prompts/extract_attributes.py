@@ -65,29 +65,51 @@ Entity to Process:
 {context.get('node', {}).get('attributes', {})}
 </NODE_EXISTING_ATTRIBUTES>
 
-Task: Based on all the provided context (especially EPISODE_CONTENT), extract values for the following attributes. 
-If an attribute is not clearly present or applicable, omit it from your response or set its value to null, 
-unless the attribute definition implies a default (like an empty list for tags if none are found).
-
-Attributes to Extract (name: description):
+Attributes to Extract (Format: attribute_name: attribute_description):
 {attributes_to_extract_str}
 
-Respond with a JSON object containing only the extracted attributes and their values. 
-For list-based attributes like 'tags', ensure the value is a list of strings. 
-For optional fields, if no information is found, you can omit the field or return null.
-Example for a node that is an 'Idea' and has tags and details:
+Task:
+Carefully analyze the EPISODE_CONTENT to find and extract values for the attributes listed above. The NODE_NAME is the primary title or essence of the entity.
+- For 'category' (if the entity is an Idea): Look for an overarching project, topic, or theme mentioned in EPISODE_CONTENT.
+- For 'details' (if the entity is an Idea): Extract the main descriptive sentences or bullet points from EPISODE_CONTENT that elaborate on the NODE_NAME. This should be supplementary to the NODE_NAME.
+- For 'tags' (if the entity is an Idea or potentially other types): Identify explicit hashtags (e.g., #example) or a few very specific keywords from EPISODE_CONTENT that are good for categorizing or searching for this entity.
+- For 'status' (if the entity is a Task, Idea, or Collection): Look for explicit mentions of its current state (e.g., "Status: InProgress", "is New", "currently Active"). Choose from typical statuses like Backlog, InProgress, Blocked, InReview, Completed (for Tasks); New, UnderConsideration, Accepted, Archived, Implemented (for Ideas); Active, Planning, OnHold, Completed, Archived (for Collections).
+- For 'priority' (if the entity is a Task): Look for terms indicating urgency like "High priority", "critical task", "Low priority".
+- For 'collection_type' (if the entity is a Collection): Identify its functional type like "Project", "Feature", "Epic", "Sprint", "IdeaPool", "ActionPlan", or "Generic" if not specified.
+- For 'full_description' (if the entity is a Task): Extract the detailed description of the task.
+- For 'description' (if the entity is a Collection): Extract the detailed description of the collection.
+- If an attribute's value is not clearly found in EPISODE_CONTENT, omit the attribute from your response or set its value to null, unless its definition implies a default (e.g., an empty list for tags if none are found).
+
+Respond with a JSON object containing ONLY the extracted attributes and their values.
+For list-based attributes like 'tags', ensure the value is a list of strings (e.g., ["tag1", "tag2"]).
+
+Example for an 'Idea' entity:
 {{
-  "tags": ["machine-learning", "new-product"],
-  "details": "This idea involves creating a new ML model to predict customer churn.",
-  "category": "product-development"
+  "category": "project nanoo",
+  "details": "This idea involves creating a new ML model to predict customer churn using a prebuilt component.",
+  "tags": ["machine-learning", "new-product", "churn-prediction"],
+  "status": "UnderConsideration"
 }}
-Example for an 'Idea' with only tags:
+
+Example for a 'Task' entity:
 {{
-  "tags": ["internal-tool"],
-  "details": null,
-  "category": null
+  "full_description": "Design the new user onboarding flow, including all screens and interaction points.",
+  "status": "Backlog",
+  "priority": "High"
 }}
-Example for an 'Idea' with no extractable attributes of these types (based on the definition):
+
+Example for a 'Collection' entity:
+{{
+  "description": "All design assets and specifications for the Alpha release.",
+  "collection_type": "Project",
+  "status": "Active"
+}}
+
+If only tags are found:
+{{
+  "tags": ["internal-tool"]
+}}
+If no specific attributes are found for this entity based on the definitions and content:
 {{}}
 """
 
