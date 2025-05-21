@@ -15,7 +15,7 @@ limitations under the License.
 """
 
 import json
-from typing import Any, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,9 +23,9 @@ from .models import Message, PromptFunction, PromptVersion
 
 
 class EdgeDuplicate(BaseModel):
-    duplicate_fact_id: int = Field(
-        ...,
-        description='id of the duplicate fact. If no duplicate facts are found, default to -1.',
+    duplicate_fact_id: Optional[str] = Field(
+        default=None,
+        description='UUID of the duplicate fact. If no duplicate facts are found, this should be null or omitted.',
     )
     contradicted_facts: list[int] = Field(
         ...,
@@ -123,7 +123,7 @@ def resolve_edge(context: dict[str, Any]) -> list[Message]:
 </AVAILABLE_FACT_TYPES>
 
 TASK:
-1.  **Duplication Check**: If NEW_EDGE_FACT is a semantic duplicate of any fact in EXISTING_EDGES_FOR_DUPLICATION_CHECK, return the 'id' (UUID) of that existing edge as 'duplicate_fact_id'. Otherwise, set 'duplicate_fact_id' to -1.
+1.  **Duplication Check**: If NEW_EDGE_FACT is a semantic duplicate of any fact in EXISTING_EDGES_FOR_DUPLICATION_CHECK, return the 'id' (UUID) of that existing edge as 'duplicate_fact_id'. Otherwise, omit 'duplicate_fact_id' or set its value to null.
 2.  **Contradiction Check**: Identify IDs (indices from the input list) of any facts in EDGE_INVALIDATION_CANDIDATES that are directly contradicted by NEW_EDGE_FACT. Return these as a list of integers in 'contradicted_facts'.
 3.  **Fact Classification**: Classify NEW_EDGE_FACT using one of the FACT_TYPE_NAMEs from AVAILABLE_FACT_TYPES. Return this as 'fact_type'. If no specific type fits well, use "DEFAULT".
 """
