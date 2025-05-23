@@ -44,7 +44,7 @@ from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.datetime_utils import utc_now
 from graphiti_core.utils.pattern_library import get_all_patterns
 from graphiti_core.utils.entity_extractor import RegexEntityExtractor, EntityMatch
-from graphiti_core.llm_client.response_models import EpisodeSummary
+from graphiti_core.prompts.summarize_episode import EpisodeSummary
 
 logger = logging.getLogger(__name__)
 
