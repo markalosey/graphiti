@@ -25,7 +25,7 @@ import pydantic
 from pydantic import BaseModel, Field
 from neo4j.exceptions import ClientError
 
-from graphiti_core.clients import GraphitiClients
+from graphiti_core.graphiti_types import GraphitiClients
 from graphiti_core.helpers import MAX_REFLEXION_ITERATIONS, semaphore_gather
 from graphiti_core.llm_client import LLMClient
 from graphiti_core.llm_client.config import ModelSize
