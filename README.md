@@ -165,6 +165,27 @@ For a complete working example, see the [Quickstart Example](./examples/quicksta
 
 The example is fully documented with clear explanations of each functionality and includes a comprehensive README with setup instructions and next steps.
 
+### Mermaid: Episode Ingestion Flow (`Graphiti.add_episode`)
+
+```mermaid
+sequenceDiagram
+  participant Client as Caller (LangGraph/MCP)
+  participant Graphiti as Graphiti.add_episode
+  participant ExtractN as extract_nodes
+  participant ExtractE as extract_edges
+  participant DB as Neo4j
+
+  Client->>Graphiti: add_episode(name, episode_body, ...)
+  Graphiti->>Graphiti: validate_entity_types
+  Graphiti->>Graphiti: retrieve_episodes(...)
+  Graphiti->>ExtractN: extract_nodes(...)
+  ExtractN-->>Graphiti: nodes
+  Graphiti->>ExtractE: extract_edges(...)
+  ExtractE-->>Graphiti: edges
+  Graphiti->>DB: write nodes/edges + embeddings
+  Graphiti-->>Client: results
+```
+
 ## MCP Server
 
 The `mcp_server` directory contains a Model Context Protocol (MCP) server implementation for Graphiti. This server allows AI assistants to interact with Graphiti's knowledge graph capabilities through the MCP protocol.

@@ -9,6 +9,7 @@ The Regex-Based Entity Extraction feature provides an efficient way to extract e
 The implementation consists of two main components:
 
 1. **RegexEntityExtractor Class (`entity_extractor.py`)**:
+
    - Core extraction functionality
    - Pattern matching and entity identification
    - Confidence scoring
@@ -46,6 +47,17 @@ The feature is integrated with the existing entity extraction pipeline as a prep
 2. If entities are found with high confidence, they are used directly
 3. If no entities or only low-confidence entities are found, the system falls back to LLM extraction
 4. The results can be combined to get the benefits of both approaches
+
+### Diagram: Regex First, LLM Fallback
+
+```mermaid
+flowchart TD
+  T[Episode Text] --> RX[Regex Extractor]
+  RX -->|High Confidence| ENT[Entities]
+  RX -->|Low/None| LLM[LLM Extraction]
+  LLM --> ENT
+  ENT --> OUT[Unified Entity Output]
+```
 
 ## Usage Examples
 
@@ -117,6 +129,7 @@ pytest tests/utils/test_regex_extraction.py::test_entity_extraction_basic
 ### GitHub Actions Integration
 
 The tests are automatically run via GitHub Actions whenever changes are made to:
+
 - The entity extractor or pattern library code
 - The test files or fixtures
 
@@ -145,4 +158,4 @@ Planned improvements to the regex-based entity extraction feature:
 2. **Additional Pattern Types**: Extend the pattern library to support more entity types
 3. **Confidence Calibration**: Refine confidence scoring for better decision-making
 4. **Adaptive Extraction**: Dynamically select patterns based on text characteristics
-5. **Multilingual Support**: Add patterns for entity extraction in multiple languages 
+5. **Multilingual Support**: Add patterns for entity extraction in multiple languages
